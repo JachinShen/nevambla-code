@@ -40,7 +40,7 @@ async function harness(cwd = "/home", machine = null) {
     watchFolder: async () => { throw new Error("Filesystem watching is outside these regression tests"); },
     theme: () => ({}), settings: () => ({}),
   };
-  const ui = { View: class {}, div() {}, v_flex() {}, h_flex() {}, InputState, Input: {}, Scrollbar: {}, v_virtual_list() {} };
+  const ui = { View: class {}, div() {}, svg() {}, v_flex() {}, h_flex() {}, InputState, Input: {}, Scrollbar: {}, v_virtual_list() {} };
   const context = vm.createContext({ console });
   const cache = new Map();
   async function load(filename) {

@@ -1,7 +1,8 @@
-import { View, div } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
 import { exec, watchFolder, theme, checking, shared, setShared, layout, run } from "herdr";
 import { location } from "./navigation.js";
+import { fileIcon, ICON_FONT } from "./icons.js";
 const key = () => JSON.stringify(location());
 // Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
 // the folder watch would see it, and every refresh would start the next one.
@@ -16,7 +17,7 @@ function find(node, id) {
 
 export default class Changes extends View {
   init(_props, cx) {
-    this.files = []; this.message = ""; this.handle = cx.focus_handle();
+    this.files = []; this.rootOpen = true; this.message = ""; this.handle = cx.focus_handle();
     this.input = InputState.new({ placeholder: "Commit message" });
     this.input.on("change", (_e, cx) => {
       const hadMessage = Boolean(this.message.trim());
@@ -128,35 +129,62 @@ export default class Changes extends View {
     cx.notify();
   }
 
+  row(file, t, active) {
+    const parts = file.path.split("/"), name = parts.pop();
+    const selected = active === diffKey(this.on, this.root, file.path);
+    const mark = file.fresh ? "U" : file.status;
+    const color = file.status === "U" || file.status === "D" ? t.ansi1 : file.status === "A" ? t.ansi2 : t.blocked;
+    const [glyph, iconColor] = fileIcon(name);
+    return h_flex().id(`change-${file.path}`).h(22).flex_none().pl(12).pr(10).gap(5).items_center().cursor_pointer()
+      .when(selected, el => el.bg(t.selected)).hover(style => style.bg(selected ? t.selected : t.hover))
+      .tooltip(file.path).on_click((_e, cx) => this.pick(file.path, cx))
+      .child(div().w(14).flex_none())
+      .child(div().w(16).flex_none().flex().justify_center().font_family(ICON_FONT).text_size(14).text_color(iconColor).child(glyph))
+      .child(h_flex().flex_1().min_w(0).gap(6).items_center()
+        .child(div().flex_shrink_0().max_w(200).truncate().text_color(color).child(name))
+        .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(parts.join("/"))))
+      .child(div().flex_none().text_size(11).text_color(color).child(mark));
+  }
+
   render(cx) {
     if (!checking() && key() !== this.context) this.refresh(cx);
-    const t = theme(), add = this.files.reduce((n, f) => n + f.add, 0), del = this.files.reduce((n, f) => n + f.del, 0);
-    const enabled = Boolean(this.message.trim() && this.root && !this.busy && !this.loading);
-    return v_flex().id("changes").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13).track_focus(this.handle)
+    const t = theme(), enabled = Boolean(this.message.trim() && this.root && !this.busy && !this.loading);
+    const editor = shared("vsc.group") === 2 && find(layout(), "editor-2")?.hidden === false ? "vsc.editor.2" : "vsc.editor";
+    const active = shared(editor)?.active;
+    const folder = this.root ?? this.cwd ?? "", name = folder.split("/").filter(Boolean).pop();
+    return v_flex().id("changes").size_full().min_h(0).bg(t.chrome).text_color(t.foreground).text_size(13).track_focus(this.handle)
       .on_key_down((e, cx) => {
         if (e.key === "escape" && this.typing) { this.typing = false; this.handle.focus(); cx.stop_propagation(); cx.notify(); }
       })
-      .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
-        .child(div().font_semibold().child("Changes"))
-        .child(div().px(5).py(1).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(`${this.files.length} files`))
-        .child(div().flex_1()).child(div().text_size(11).text_color(t.ansi2).child(`+${add}`)).child(div().text_size(11).text_color(t.ansi1).child(`−${del}`)))
-      .child(div().h(28).flex_none().px(14).flex().items_center().text_size(11).text_color(t.muted)
-        .child(div().truncate().tooltip(`${this.on ?? "本机"} · ${this.root ?? this.cwd ?? "No folder"}`)
-          .child(`${this.on ?? "本机"} · ${this.root ?? this.cwd ?? "No folder"}`)))
-      // overflow_y_scrollbar() wraps the list, so its flex sizing never reached the panel's layout.
-      .child(div().flex_1().min_h(44).relative().border_b(1).border_color(t.border)
-        .child(v_flex().id("changes-list").absolute().inset_0().overflow_y_scroll().p(6).children(this.files.map((f) => {
-        const parts = f.path.split("/"), name = parts.pop();
-        return h_flex().id(`change-${f.path}`).h(28).flex_none().px(8).gap(8).items_center().rounded(7).cursor_pointer().when(this.open === f.path, (e) => e.bg(t.selected)).hover((s) => s.bg(t.hover)).on_click((_e, cx) => this.pick(f.path, cx))
-          .child(div().w(14).text_size(11).text_color(f.status === "A" ? t.ansi2 : f.status === "D" ? t.ansi1 : f.status === "U" ? t.ansi1 : t.blocked).child(f.status))
-          .child(h_flex().flex_1().min_w(0).child(div().text_color(t.dim).truncate().child(parts.length ? parts.join("/") + "/" : "")).child(div().max_w(260).min_w(0).truncate().child(name)))
-          .when(f.add > 0, (e) => e.child(div().text_size(11).text_color(t.ansi2).child(`+${f.add}`))).when(f.del > 0, (e) => e.child(div().text_size(11).text_color(t.ansi1).child(`−${f.del}`)));
-      })).when(!this.files.length, (e) => e.child(div().p(8).text_color(t.dim).child(this.error || (this.loading ? "Loading changes…" : this.root ? "No uncommitted changes" : "No folder")))))
+      .child(h_flex().h(35).flex_none().px(20).gap(8).items_center().text_size(11).text_color(t.muted)
+        .child(div().child("SOURCE CONTROL"))
+        .child(div().flex_1().min_w(0).truncate().child(this.on ? `SSH · ${this.on}` : ""))
+        .child(div().id("refresh-changes").w(18).text_size(14).text_color(this.loading ? t.dim : t.muted)
+          .cursor_pointer().tooltip("刷新更改").hover(style => style.text_color(t.foreground))
+          .on_click((_e, cx) => this.refresh(cx)).child("↻")))
+      .child(h_flex().id("changes-root").h(22).flex_none().pl(4).pr(10).gap(4).items_center().cursor_pointer().text_size(11).font_semibold()
+        .tooltip(`${this.on ?? "本机"} · ${folder}`)
+        .on_click((_e, cx) => { this.rootOpen = !this.rootOpen; cx.notify(); })
+        .child(svg(`mods/vsc-changes/chevron-${this.rootOpen ? "down" : "right"}.svg`).size(14).text_color(t.muted))
+        .child(div().flex_1().min_w(0).truncate().child(name?.toUpperCase() || "NO FOLDER"))
+        .child(div().font_normal().text_color(t.dim).child(String(this.files.length))))
+      .child(div().flex_1().min_h(0).relative()
+        .child(v_flex().id("changes-list").absolute().inset_0().overflow_y_scroll().pb(8)
+          .children(this.rootOpen ? this.files.map(file => this.row(file, t, active)) : [])
+          .when(this.rootOpen && !this.files.length, el => el.child(div().px(20).py(6).text_size(12).text_color(this.error ? t.ansi1 : t.dim)
+            .child(this.error || (this.loading ? "Loading…" : this.root ? "No uncommitted changes" : "No folder")))))
         .child(Scrollbar.vertical("changes-list").absolute().inset_0()))
-      .when(this.limited, el => el.child(div().px(12).py(4).text_size(11).text_color(t.dim).child("Showing the first 1,000 changed files")))
-      .when(Boolean(this.note), (e) => e.child(div().px(10).pb(8).text_size(11).text_color(t.ansi1).child(this.note)))
-      .child(h_flex().flex_none().p(10).gap(8).border_t(1).border_color(t.border)
-        .child(div().id("commit-message").flex_1().min_w(0).h(32).px(10).flex().items_center().rounded(8).border_1().border_color(this.typing ? t.accent : t.border).cursor_text().on_mouse_down("left", (_e, cx) => cx.stop_propagation()).child(Input.new(this.input).h_full().text_size(12).text_color(t.foreground)))
-        .child(div().id("commit").h(32).px(14).flex().items_center().rounded(8).bg(enabled ? t.solid : t.raised).text_color(enabled ? t.solid_foreground : t.dim).text_size(12).when(enabled, (e) => e.cursor_pointer()).on_click((_e, cx) => this.commit(cx)).child(this.busy ? "Committing…" : "Commit")));
+      .when(this.limited, el => el.child(div().px(20).py(4).text_size(11).text_color(t.dim).child("Showing the first 1,000 changed files")))
+      .when(Boolean(this.note), el => el.child(div().px(12).pb(8).text_size(11).text_color(t.ansi1).child(this.note)))
+      .child(h_flex().flex_none().px(12).py(8).gap(6).border_t(1).border_color(t.border)
+        .child(div().id("commit-message").flex_1().min_w(0).h(28).px(8).flex().items_center().rounded(3).bg(t.background)
+          .border_1().border_color(this.typing ? t.accent : t.border).cursor_text()
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .child(Input.new(this.input).h_full().text_size(12).text_color(t.foreground)))
+        .child(div().id("commit").h(28).px(10).flex().items_center().rounded(3).border_1().border_color(t.border)
+          .bg(enabled ? t.surface : t.chrome).text_color(enabled ? t.foreground : t.dim).text_size(11)
+          .tooltip("暂存全部改动并提交")
+          .when(enabled, el => el.cursor_pointer().hover(style => style.bg(t.hover)))
+          .on_click((_e, cx) => this.commit(cx)).child(this.busy ? "Committing…" : "Commit")));
   }
 }
