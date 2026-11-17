@@ -1,0 +1,6 @@
+vsc-changes is derived from the Changes mod shipped with Herdr app 0.1.16.
+Upstream: https://github.com/herdrdev/herdr-app
+Licensed under the Apache License, Version 2.0; see LICENSE.
+
+Modified in this fork to follow Explorer navigation, preserve repository errors,
+and open read-only diffs in the main editor instead of the sidebar.

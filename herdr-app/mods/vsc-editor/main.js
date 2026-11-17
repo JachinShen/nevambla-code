@@ -5,10 +5,11 @@
 // ⌘S saves (vsc-editor.save), ⌘W closes the file (vsc-editor.close).
 // .ipynb files open as notebooks (notebook.js): ⇧↩ runs the focused cell (vsc-editor.run).
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, TextView } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState, TextView, ScrollHandle } from "gpui-base";
 import { fileIcon, ICON_FONT } from "./icons.js";
 import { Notebook } from "./notebook.js";
 import { Pdf } from "./pdf.js";
+import { GitDiff } from "./diff.js";
 import { theme, shared, setShared, readTextFile, writeTextFile, nextCommand, settings, layout, exec, run, spaces, props } from "herdr";
 
 function find(node, id) {
@@ -44,9 +45,12 @@ export default class VscEditor extends View {
     this.group = props()?.group ?? 1;
     this.key = keyOf(this.group);
     this.docs = new Map();
+    this.tabScroll = ScrollHandle.new();
     this.wrap = narrow();
     // Notebooks: kernel state and running cells (only does work while a kernel is on).
     cx.timer.every(300, cx => { for (const d of this.docs.values()) if (d.nb) cx.spawn(async cx => d.nb.poll(cx)); });
+    // Only the active diff is polled; it stays tied to its repository and machine.
+    cx.timer.every(10000, cx => this.docs.get(this.state().active)?.diff?.refresh(cx));
     // PDFs: show pages as pdftoppm finishes them.
     cx.timer.every(600, cx => { for (const d of this.docs.values()) if (d.pdf && !d.pdf.done) cx.spawn(async cx => { if (await d.pdf.poll()) cx.notify(); }); });
     cx.spawn(async cx => {
@@ -82,6 +86,11 @@ export default class VscEditor extends View {
   load(f, cx) {
     const doc = { file: f, code: null, original: null, dirty: false, error: null };
     this.docs.set(f.path, doc);
+    if (f.kind === "diff") {
+      doc.diff = new GitDiff(f);
+      doc.diff.refresh(cx);
+      return;
+    }
     if (ext(f.path) === "pdf") {
       doc.pdf = new Pdf(f);
       cx.spawn(async cx => {
@@ -140,22 +149,29 @@ export default class VscEditor extends View {
   }
 
   sync(s, cx) {
-    for (const f of s.files) if (!this.docs.has(f.path)) this.load(f, cx);
+    for (const f of s.files) {
+      const doc = this.docs.get(f.path);
+      if (!doc) this.load(f, cx);
+      else if (doc.diff && doc.file.revision !== f.revision) {
+        doc.file = f; doc.diff.refresh(cx);
+      }
+    }
     for (const [p, d] of this.docs) if (!s.files.some(f => f.path === p)) {
       d.code?.release(); d.nb?.release(); d.nb?.shutdown(); this.docs.delete(p);
     }
   }
 
   tab(f, active, t) {
-    const doc = this.docs.get(f.path), e = ext(f.path);
+    const doc = this.docs.get(f.path), display = f.sourcePath ?? f.path, e = ext(display);
     return h_flex().id(`tab-${f.path}`).h_full().flex_none().pl(12).pr(6).gap(6).items_center().cursor_pointer().relative()
       .bg(active ? t.background : t.chrome).border_r(1).border_color(t.border).text_color(active ? t.foreground : t.muted)
       .on_click(() => this.setState({ ...this.state(), active: f.path }))
       .on_mouse_down("left", e => { this.drag = { path: f.path, x: e.position.x, y: e.position.y, on: false }; })
       .on_mouse_down("middle", () => this.closeFile(f.path))
       .when(active, el => el.child(div().absolute().top(0).left(0).right(0).h(1).bg(t.accent)))
-      .child((([ch, col]) => div().font_family(ICON_FONT).text_size(14).text_color(col).child(ch))(fileIcon(base(f.path))))
-      .child(div().child(base(f.path)))
+      .child((([ch, col]) => div().font_family(ICON_FONT).text_size(14).text_color(col).child(ch))(fileIcon(base(display))))
+      .child(div().child(base(display)))
+      .when(f.kind === "diff", el => el.child(div().text_size(10).text_color(t.muted).child("Diff")))
       .child(div().id(`x-${f.path}`).size(18).flex().items_center().justify_center().rounded(4).text_color(t.muted)
         .hover(s => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -263,7 +279,13 @@ export default class VscEditor extends View {
     this.sync(s, cx);
     if (!s.files.length) return this.empty(t);
     const f = s.files.find(x => x.path === s.active) ?? s.files[0], doc = this.docs.get(f.path);
-    const rel = f.path.startsWith(f.root + "/") ? f.path.slice(f.root.length + 1) : f.path;
+    const activeIndex = s.files.findIndex(x => x.path === f.path);
+    if (this.selectedTab !== f.path || this.selectedIndex !== activeIndex) {
+      this.selectedTab = f.path; this.selectedIndex = activeIndex;
+      this.tabScroll.scroll_to_item(activeIndex);
+    }
+    const display = f.sourcePath ?? f.path;
+    const rel = display.startsWith(f.root + "/") ? display.slice(f.root.length + 1) : display;
     const mine = activeGroup() === this.group, split = !(find(layout(), "editor-2")?.hidden ?? true);
     return v_flex().id("editor").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(13)
       // Clicking anywhere on this side makes it the one the Explorer and keys act on.
@@ -274,7 +296,8 @@ export default class VscEditor extends View {
       .on_hover((h, cx) => { if (!h && this.drag) { this.drag = null; cx.notify(); } })
       .when(split && mine, el => el.border_t(1).border_color(t.accent))
       .child(h_flex().h(35).flex_none().bg(t.chrome).border_b(1).border_color(t.border)
-        .child(h_flex().id("tabs").flex_1().min_w(0).h_full().overflow_x_scroll()
+        .child(h_flex().id("tabs").flex_1().min_w(0).h_full().overflow_x_scroll().track_scroll(this.tabScroll)
+          .on_size_change((_size, cx) => { this.tabScroll.scroll_to_item(activeIndex); cx.notify(); })
           .children(s.files.map(x => this.tab(x, x.path === f.path, t))))
         .child(div().id("split").flex_none().h(24).px(8).mx(6).flex().items_center().rounded(4).cursor_pointer()
           .text_size(12).text_color(t.muted).hover(st => st.bg(t.hover).text_color(t.foreground))
@@ -294,7 +317,8 @@ export default class VscEditor extends View {
             .on_click((_e, cx) => { doc.preview = !doc.preview; cx.notify(); })
             .child(doc.preview ? "Edit  ⇧⌘V" : "Preview  ⇧⌘V"))))
       .when(Boolean(doc?.saveError), el => el.child(div().px(14).py(4).text_size(12).text_color(t.ansi1).child(doc.saveError)))
-      .child(doc?.pdf ? div().flex_1().min_h(0).child(doc.pdf.render(t))
+      .child(doc?.diff ? doc.diff.render(t)
+        : doc?.pdf ? div().flex_1().min_h(0).child(doc.pdf.render(t))
         : doc?.nb ? div().flex_1().min_h(0).child(doc.nb.render(t))
         : doc?.code && doc.preview ? this.markdown(doc, t)
         : doc?.code ? Editor.new(doc.code).flex_1().min_h(0)
