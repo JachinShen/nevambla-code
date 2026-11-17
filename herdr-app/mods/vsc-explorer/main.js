@@ -1,25 +1,14 @@
 // VS Code-style Explorer: the focused pane's folder as a tree. Clicking a file
 // opens it in the vsc-editor block (shared "vsc.editor").
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { fileIcon, folderIcon, ICON_FONT } from "./icons.js";
-import { spaces, panes, focused, exec, watchFolder, theme, shared, setShared, layout } from "herdr";
+import { exec, watchFolder, theme, shared, setShared, layout, checking, run, openOverlay } from "herdr";
+import { findNode, editorKey, terminalLocation, browsingLocation as location } from "./navigation.js";
 
 // Files open on the editor side used last (vsc-editor's split), while that side is shown.
-function findNode(node, id) {
-  if (node?.id === id) return node;
-  for (const c of node?.children ?? []) { const f = findNode(c, id); if (f) return f; }
-  return null;
-}
-const editorKey = () => shared("vsc.group") === 2 && findNode(layout(), "editor-2")?.hidden === false ? "vsc.editor.2" : "vsc.editor";
-
-function location() {
-  const space = spaces().find(s => s.active), f = focused();
-  const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
-  const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
-  return { cwd: pane?.cwd || f?.cwd || space?.folder, on };
-}
 const key = () => JSON.stringify(location());
+const join = (cwd, path) => `${cwd.replace(/\/+$/, "")}/${path}`;
 const PER_FOLDER = 500, TOTAL = 5000;
 const HIDE = new Set([".git", ".DS_Store"]);
 
@@ -40,6 +29,8 @@ const EXT = { js: "ansi3", mjs: "ansi3", ts: "ansi4", tsx: "ansi4", jsx: "ansi6"
 export default class VscExplorer extends View {
   init(_p, cx) {
     this.saved = new Map(); this.entries = new Map(); this.folders = new Set(); this.marks = {}; this.rootOpen = true;
+    this.scroll = ScrollHandle.new();
+    if (checking()) return;
     this.refresh(cx);
     // The folder watcher catches changes as they happen; this is only a fallback (remote
     // folders, missed events), and it skips work while the side bar is hidden.
@@ -49,7 +40,7 @@ export default class VscExplorer extends View {
   current(ctx) { return this.context === ctx && key() === ctx.key; }
 
   async loadFolder(path, ctx) {
-    const entries = await directory(path ? `${ctx.cwd}/${path}` : ctx.cwd, ctx.on);
+    const entries = await directory(path ? join(ctx.cwd, path) : ctx.cwd, ctx.on);
     if (!this.current(ctx) || (path && !this.folders.has(path))) return;
     this.entries.set(path, entries.slice(0, PER_FOLDER).sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name)));
   }
@@ -89,6 +80,11 @@ export default class VscExplorer extends View {
         }
         if (!this.current(ctx)) return;
         this.marks = marks; this.error = null; this.watch(ctx, cx);
+        if (this.revealPath) {
+          const index = this.flatten("", 0, []).findIndex(item => join(ctx.cwd, item.path) === this.revealPath);
+          if (index >= 0) this.scroll.scroll_to_item(index);
+          this.revealPath = null;
+        }
       } catch (e) { if (this.current(ctx)) this.error = String(e); }
       finally { if (this.context === ctx) this.loading = false; cx.notify(); }
     });
@@ -106,7 +102,7 @@ export default class VscExplorer extends View {
   }
 
   open(path) {
-    const ctx = this.context, abs = `${ctx.cwd}/${path}`;
+    const ctx = this.context, abs = join(ctx.cwd, path);
     const key = editorKey(), ed = shared(key) ?? { files: [], active: null };
     const files = ed.files.some(f => f.path === abs) ? ed.files : [...ed.files, { path: abs, root: ctx.cwd, on: ctx.on ?? null }];
     setShared(key, { files, active: abs });
@@ -128,7 +124,8 @@ export default class VscExplorer extends View {
   }
 
   row({ e, path, depth }, t, active) {
-    const abs = `${this.context.cwd}/${path}`, open = this.folders.has(path);
+    const abs = join(this.context.cwd, path), open = this.folders.has(path);
+    const source = { on: this.context.on, path: abs, name: e.name };
     const mark = this.marks[abs], sel = abs === active;
     const markColor = mark === "U" || mark === "A" ? t.ansi2 : mark === "D" ? t.ansi1 : t.blocked;
     const ext = e.name.includes(".") ? e.name.split(".").pop().toLowerCase() : "";
@@ -139,21 +136,40 @@ export default class VscExplorer extends View {
                    : div().w(14).flex_none())
       .child(this.glyph(e.dir ? folderIcon(open) : fileIcon(e.name)))
       .child(div().flex_1().min_w(0).truncate().text_color(mark && mark !== "•" ? markColor : t.foreground).child(e.name))
+      .when(!e.dir, el => el.child(div().id(`transfer-${path}`).w(22).h(20).flex_none().flex().items_center().justify_center()
+        .rounded(3).text_color(t.muted).hover(s => s.bg(t.raised).text_color(t.foreground)).tooltip("传到另一台机器…")
+        .on_click((_event, cx) => { cx.stop_propagation(); openOverlay({ mod: "vsc-transfer", kind: "dialog", modal: true, width: 590, height: 410, props: { source: { ...source, on: source.on ?? null } } }); })
+        .child(svg("mods/vsc-explorer/transfer.svg").size(14))))
       .when(Boolean(mark), el => el.child(div().flex_none().text_size(11).text_color(markColor).child(mark)));
   }
 
   render(cx) {
-    if (key() !== this.context?.key) this.refresh(cx);
+    if (!checking() && key() !== this.context?.key) this.refresh(cx);
+    const completed = shared("vsc.transfer.completed");
+    if (!checking() && completed && this.completedToken !== completed.token) {
+      this.completedToken = completed.token;
+      if ((this.context?.on ?? null) === completed.on && this.context?.cwd === completed.folder) this.refresh(cx);
+    }
+    const jump = shared("vsc.explorer.jump"), pinned = jump?.source === JSON.stringify(terminalLocation());
+    if (!checking() && pinned && this.revealToken !== jump.token) {
+      this.revealToken = jump.token;
+      this.revealPath = jump.file;
+      this.rootOpen = true;
+      this.refresh(cx);
+    }
     const t = theme(), active = shared(editorKey())?.active;
     const name = (this.context?.cwd ?? "").split("/").filter(Boolean).pop() ?? "";
     const items = this.rootOpen ? this.flatten("", 0, []) : [];
     return v_flex().id("explorer").size_full().min_h(0).bg(t.chrome).text_color(t.foreground).text_size(13)
-      .child(h_flex().h(35).flex_none().px(20).items_center().text_size(11).text_color(t.muted).child("EXPLORER"))
+      .child(h_flex().h(35).flex_none().px(20).gap(8).items_center().text_size(11).text_color(t.muted).child("EXPLORER")
+        .child(div().flex_1().min_w(0).truncate().child(this.context?.on ? `SSH · ${this.context.on}` : ""))
+        .when(pinned, el => el.child(div().id("follow-terminal").w(18).cursor_pointer().tooltip("返回终端当前目录").on_click((_event, cx) => { setShared("vsc.explorer.jump", null); this.refresh(cx); }).child("↶")))
+        .child(div().id("jump-path").w(18).cursor_pointer().tooltip("跳转到路径 ⌘⇧O").on_click(() => run("mod.open", { name: "vsc-jump" })).child("↗")))
       .child(h_flex().id("root").h(22).flex_none().px(4).gap(4).items_center().cursor_pointer().text_size(11).font_semibold()
         .on_click((_e, cx) => { this.rootOpen = !this.rootOpen; cx.notify(); })
         .child(svg(`mods/vsc-explorer/chevron-${this.rootOpen ? "down" : "right"}.svg`).size(14).text_color(t.muted))
         .child(div().truncate().child(name.toUpperCase() || "NO FOLDER")))
-      .when(this.rootOpen && items.length > 0, el => el.child(v_flex().id("tree").flex_1().min_h(0).overflow_y_scrollbar().pb(8)
+      .when(this.rootOpen && items.length > 0, el => el.child(v_flex().id("tree").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll).pb(8)
         .children(items.map(it => this.row(it, t, active)))))
       .when(this.rootOpen && (Boolean(this.error) || !items.length), el => el.child(div().px(20).py(6).text_size(12).text_color(t.dim)
         .child(this.error || (this.loading ? "Loading…" : "Empty folder"))));

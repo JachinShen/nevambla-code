@@ -7,3 +7,20 @@ session-snapshots/
 release-notes.json
 *.bak.*
 .DS_Store
+
+# Generated Herdr API files and local window state
+herdr-app/**/gpui-kit.d.ts
+herdr-app/**/herdr.d.ts
+herdr-app/**/jsconfig.json
+herdr-app/AGENTS.md
+herdr-app/data/
+herdr-app/shared.json
+herdr-app/view.json
+herdr-app/seen.json
+herdr-app/installed.json
+herdr-app/settings.json
+herdr-app/window.json
+herdr-app/windows.json
+*.error
+__pycache__/
+*.pyc

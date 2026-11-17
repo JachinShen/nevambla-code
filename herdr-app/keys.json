@@ -4,7 +4,8 @@
     "cmd-j": "layout.toggle:termpanel",
     "cmd-alt-j": "vsc-panelbar.flip",
     "cmd-shift-v": "vsc-editor.preview",
-    "cmd-alt-r": "vsc-editor.runfile"
+    "cmd-alt-r": "vsc-editor.runfile",
+    "cmd-shift-o": "mod.open:vsc-jump"
   },
   "mod:vsc-editor": {
     "cmd-s": "vsc-editor.save",
