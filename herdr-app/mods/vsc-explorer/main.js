@@ -5,6 +5,7 @@ import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { fileIcon, folderIcon, ICON_FONT } from "./icons.js";
 import { exec, watchFolder, theme, shared, setShared, layout, checking, run, openOverlay } from "herdr";
 import { findNode, editorKey, terminalLocation, browsingLocation as location } from "./navigation.js";
+import { gitRoot, withGitIgnores } from "./git.js";
 
 // Files open on the editor side used last (vsc-editor's split), while that side is shown.
 const key = () => JSON.stringify(location());
@@ -21,14 +22,10 @@ async function directory(path, on) {
   return out;
 }
 
-// File-type tint, like VS Code's icon themes.
-const EXT = { js: "ansi3", mjs: "ansi3", ts: "ansi4", tsx: "ansi4", jsx: "ansi6", json: "ansi3", md: "ansi4", py: "ansi4",
-  css: "ansi6", scss: "ansi5", html: "ansi1", astro: "ansi1", rs: "ansi1", go: "ansi6", sh: "ansi2", toml: "ansi1",
-  yml: "ansi5", yaml: "ansi5", lua: "ansi4", c: "ansi4", cpp: "ansi4", h: "ansi5", sol: "ansi8", tex: "ansi2" };
-
 export default class VscExplorer extends View {
   init(_p, cx) {
     this.saved = new Map(); this.entries = new Map(); this.folders = new Set(); this.marks = {}; this.rootOpen = true;
+    this.folderErrors = new Map();
     this.scroll = ScrollHandle.new();
     if (checking()) return;
     this.refresh(cx);
@@ -40,9 +37,18 @@ export default class VscExplorer extends View {
   current(ctx) { return this.context === ctx && key() === ctx.key; }
 
   async loadFolder(path, ctx) {
-    const entries = await directory(path ? join(ctx.cwd, path) : ctx.cwd, ctx.on);
-    if (!this.current(ctx) || (path && !this.folders.has(path))) return;
-    this.entries.set(path, entries.slice(0, PER_FOLDER).sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name)));
+    const current = () => this.current(ctx) && (!path || this.folders.has(path));
+    const cwd = path ? join(ctx.cwd, path) : ctx.cwd;
+    try {
+      const entries = (await directory(cwd, ctx.on)).slice(0, PER_FOLDER)
+        .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+      if (!current()) return;
+      // Keep files browsable if Git fails, with an explicit error below the tree.
+      this.entries.set(path, entries);
+      const classified = await withGitIgnores(entries, cwd, ctx.on);
+      if (!current()) return;
+      this.entries.set(path, classified); this.folderErrors.delete(path);
+    } catch (e) { if (current()) this.folderErrors.set(path, String(e)); }
   }
 
   watch(ctx, cx) {
@@ -59,19 +65,20 @@ export default class VscExplorer extends View {
     if (next !== this.context?.key) {
       if (this.context) this.saved.set(this.context.key, this.folders);
       this.context = { key: next, cwd, on }; this.entries = new Map(); this.folders = new Set(this.saved.get(next));
-      this.marks = {}; this.watched = null; this.error = null; this.loading = false;
+      this.marks = {}; this.folderErrors = new Map(); this.watched = null; this.error = null; this.loading = false;
     }
     if (!cwd || this.loading) return;
     const ctx = this.context; this.loading = true;
     cx.spawn(async cx => {
       try {
         for (const p of ["", ...this.folders]) { if (!this.current(ctx)) return; await this.loadFolder(p, ctx); }
-        const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on }).catch(() => null);
+        const top = await gitRoot(cwd, on);
         const marks = {};
-        if (top?.code === 0) {
-          const st = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"], { cwd, on }).catch(() => null);
-          if (st?.code === 0) for (const e of st.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
-            const xy = e.slice(0, 2), full = `${top.stdout.trim()}/${e.slice(3)}`;
+        if (top) {
+          const st = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"], { cwd, on });
+          if (st.code !== 0) throw new Error(st.stderr || "Cannot read Git status");
+          for (const e of st.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
+            const xy = e.slice(0, 2), full = `${top}/${e.slice(3)}`;
             const m = xy === "??" ? "U" : xy.includes("A") ? "A" : xy.includes("D") ? "D" : "M";
             marks[full] = m;
             // Folders containing changes get a dot, like VS Code.
@@ -79,24 +86,24 @@ export default class VscExplorer extends View {
           }
         }
         if (!this.current(ctx)) return;
-        this.marks = marks; this.error = null; this.watch(ctx, cx);
+        this.marks = marks; this.error = null;
         if (this.revealPath) {
           const index = this.flatten("", 0, []).findIndex(item => join(ctx.cwd, item.path) === this.revealPath);
           if (index >= 0) this.scroll.scroll_to_item(index);
           this.revealPath = null;
         }
-      } catch (e) { if (this.current(ctx)) this.error = String(e); }
-      finally { if (this.context === ctx) this.loading = false; cx.notify(); }
+      } catch (e) { if (this.current(ctx)) { this.marks = {}; this.error = String(e); } }
+      finally { if (this.context === ctx) this.loading = false; if (this.current(ctx)) this.watch(ctx, cx); cx.notify(); }
     });
   }
 
   toggle(path, cx) {
     if (this.folders.has(path)) {
-      for (const f of [...this.folders]) if (f === path || f.startsWith(path + "/")) { this.folders.delete(f); this.entries.delete(f); }
+      for (const f of [...this.folders]) if (f === path || f.startsWith(path + "/")) { this.folders.delete(f); this.entries.delete(f); this.folderErrors.delete(f); }
     } else {
       this.folders.add(path);
       const ctx = this.context;
-      cx.spawn(async cx => { try { await this.loadFolder(path, ctx); } catch (e) { this.error = String(e); } finally { cx.notify(); } });
+      cx.spawn(async cx => { await this.loadFolder(path, ctx); cx.notify(); });
     }
     cx.notify();
   }
@@ -127,15 +134,15 @@ export default class VscExplorer extends View {
     const abs = join(this.context.cwd, path), open = this.folders.has(path);
     const source = { on: this.context.on, path: abs, name: e.name };
     const mark = this.marks[abs], sel = abs === active;
-    const markColor = mark === "U" || mark === "A" ? t.ansi2 : mark === "D" ? t.ansi1 : t.blocked;
-    const ext = e.name.includes(".") ? e.name.split(".").pop().toLowerCase() : "";
+    const markColor = e.ignored ? t.dim : mark === "U" || mark === "A" ? t.ansi2 : mark === "D" ? t.ansi1 : t.blocked;
+    const [glyph, color] = e.dir ? folderIcon(open) : fileIcon(e.name);
     return h_flex().id(`f-${path}`).h(22).flex_none().pl(12 + depth * 12).pr(10).gap(5).items_center().cursor_pointer()
       .when(sel, el => el.bg(t.selected)).hover(s => s.bg(sel ? t.selected : t.hover))
       .on_click((_e, cx) => e.dir ? this.toggle(path, cx) : this.open(path))
-      .child(e.dir ? svg(`mods/vsc-explorer/chevron-${open ? "down" : "right"}.svg`).size(14).flex_none().text_color(t.muted)
+      .child(e.dir ? svg(`mods/vsc-explorer/chevron-${open ? "down" : "right"}.svg`).size(14).flex_none().text_color(e.ignored ? t.dim : t.muted)
                    : div().w(14).flex_none())
-      .child(this.glyph(e.dir ? folderIcon(open) : fileIcon(e.name)))
-      .child(div().flex_1().min_w(0).truncate().text_color(mark && mark !== "•" ? markColor : t.foreground).child(e.name))
+      .child(this.glyph([glyph, e.ignored ? t.dim : color]))
+      .child(div().flex_1().min_w(0).truncate().text_color(e.ignored ? t.dim : mark && mark !== "•" ? markColor : t.foreground).child(e.name))
       .when(!e.dir, el => el.child(div().id(`transfer-${path}`).w(22).h(20).flex_none().flex().items_center().justify_center()
         .rounded(3).text_color(t.muted).hover(s => s.bg(t.raised).text_color(t.foreground)).tooltip("传到另一台机器…")
         .on_click((_event, cx) => { cx.stop_propagation(); openOverlay({ mod: "vsc-transfer", kind: "dialog", modal: true, width: 590, height: 410, props: { source: { ...source, on: source.on ?? null } } }); })
@@ -160,6 +167,7 @@ export default class VscExplorer extends View {
     const t = theme(), active = shared(editorKey())?.active;
     const name = (this.context?.cwd ?? "").split("/").filter(Boolean).pop() ?? "";
     const items = this.rootOpen ? this.flatten("", 0, []) : [];
+    const error = [this.error, ...this.folderErrors.values()].filter(Boolean).join("\n");
     return v_flex().id("explorer").size_full().min_h(0).bg(t.chrome).text_color(t.foreground).text_size(13)
       .child(h_flex().h(35).flex_none().px(20).gap(8).items_center().text_size(11).text_color(t.muted).child("EXPLORER")
         .child(div().flex_1().min_w(0).truncate().child(this.context?.on ? `SSH · ${this.context.on}` : ""))
@@ -171,7 +179,7 @@ export default class VscExplorer extends View {
         .child(div().truncate().child(name.toUpperCase() || "NO FOLDER")))
       .when(this.rootOpen && items.length > 0, el => el.child(v_flex().id("tree").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll).pb(8)
         .children(items.map(it => this.row(it, t, active)))))
-      .when(this.rootOpen && (Boolean(this.error) || !items.length), el => el.child(div().px(20).py(6).text_size(12).text_color(t.dim)
-        .child(this.error || (this.loading ? "Loading…" : "Empty folder"))));
+      .when(this.rootOpen && (Boolean(error) || !items.length), el => el.child(div().px(20).py(6).text_size(12).text_color(error ? t.ansi1 : t.dim)
+        .child(error || (this.loading ? "Loading…" : "Empty folder"))));
   }
 }

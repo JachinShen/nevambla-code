@@ -20,7 +20,7 @@ JachinShen’s fork of [nevambla/nevambla-code](https://github.com/nevambla/neva
 - **Title bar:** your Claude plan usage (session and week), a centered command center that opens the palette, side bar and editor toggles, and a clock.
 - **Path navigation and transfers:** ⌘⇧O opens a local or remote terminal path in Explorer. The file tree’s transfer action copies a file between this computer and a registered SSH machine, or between two SSH machines. Completed transfers offer the full destination path for copying.
 - **Activity bar:** switches the side bar between Explorer, Changes and Spaces.
-- **Side bar:** the file tree of the focused pane’s folder, with your spaces and agents underneath. Source Control follows the folder selected in Explorer; selecting a change opens a read-only diff tab in the main editor, including staged and unstaged changes against HEAD.
+- **Side bar:** the file tree of the focused pane’s folder, with your spaces and agents underneath. Git-ignored files and folders stay browsable with dimmed names and icons, locally and over SSH. Source Control follows the folder selected in Explorer; selecting a change opens a read-only diff tab in the main editor, including staged and unstaged changes against HEAD.
 - **Editor:** file tabs and an editable code view, with a second editor group to split into. It also previews Markdown and PDFs, runs Python files and runs Jupyter notebooks.
 - **Terminal panel:** your herdr terminals below the editor, with 160 px tabs aligned left, a new-tab button directly after them, and split, move and maximize actions on the right. Double-click a tab to rename it.
 
@@ -60,7 +60,7 @@ As herdr asks for shared layouts:
 Run the portable regressions from the checkout:
 
 ```sh
-node --experimental-vm-modules --test herdr-app/mods/vsc-changes/tests/changes.test.mjs herdr-app/mods/vsc-editor/tests/diff.test.mjs herdr-app/mods/vsc-titlebar/tests/usage.test.mjs
+node --experimental-vm-modules --test herdr-app/mods/vsc-explorer/tests/explorer.test.mjs herdr-app/mods/vsc-changes/tests/changes.test.mjs herdr-app/mods/vsc-editor/tests/diff.test.mjs herdr-app/mods/vsc-titlebar/tests/usage.test.mjs
 python3 -B -m unittest discover -s herdr-app/mods/vsc-explorer/tests -p 'test_*.py' -k Integrity
 ```
 
