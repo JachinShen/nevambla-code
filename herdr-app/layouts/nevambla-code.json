@@ -116,7 +116,7 @@
         },
         {
           "id": "work",
-          "type": "row",
+          "type": "column",
           "children": [
             {
               "id": "editor",
@@ -151,7 +151,7 @@
                 }
               ],
               "size": {
-                "weight": 2.7191314697265625
+                "weight": 2
               },
               "divider": {
                 "width": 1,
@@ -169,7 +169,7 @@
                     "mod": "vsc-panelbar"
                   },
                   "size": {
-                    "px": 24
+                    "px": 36
                   }
                 },
                 {
@@ -202,7 +202,7 @@
                 }
               ],
               "size": {
-                "weight": 2.2808685302734375
+                "weight": 3
               },
               "min": 120,
               "background": "chrome"
