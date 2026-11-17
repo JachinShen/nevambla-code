@@ -1,6 +1,6 @@
 # nevambla-code
 
-My setup for [herdr](https://herdr.dev), the terminal workspace manager for AI coding agents: an editor-style desktop layout called **nevambla-code**, its panels, the Dracula colors, the JetBrainsMono Nerd Font and my terminal settings.
+JachinShen’s fork of [nevambla/nevambla-code](https://github.com/nevambla/nevambla-code) for [herdr](https://herdr.dev), the terminal workspace manager for AI coding agents: an editor-style desktop layout called **nevambla-code**, its panels, the Dracula colors, the JetBrainsMono Nerd Font and my terminal settings.
 
 ![nevambla-code](preview.png)
 
@@ -18,16 +18,17 @@ My setup for [herdr](https://herdr.dev), the terminal workspace manager for AI c
 ## The layout
 
 - **Title bar:** your Claude plan usage (session and week), a centered command center that opens the palette, side bar and editor toggles, and a clock.
+- **Path navigation and transfers:** ⌘⇧O opens a local or remote terminal path in Explorer. The file tree’s transfer action copies a file between this computer and a registered SSH machine, or between two SSH machines. Completed transfers offer the full destination path for copying.
 - **Activity bar:** switches the side bar between Explorer, Changes and Spaces.
-- **Side bar:** the file tree of the focused pane's folder, with your spaces and agents underneath.
+- **Side bar:** the file tree of the focused pane’s folder, with your spaces and agents underneath. Source Control follows the folder selected in Explorer; selecting a change opens a read-only diff tab in the main editor, including staged and unstaged changes against HEAD.
 - **Editor:** file tabs and an editable code view, with a second editor group to split into. It also previews Markdown and PDFs, runs Python files and runs Jupyter notebooks.
-- **Terminal panel:** your herdr terminals and agents, with a bar for the space's tabs, new tab, split and maximize.
+- **Terminal panel:** your herdr terminals below the editor, with 160 px tabs aligned left, a new-tab button directly after them, and split, move and maximize actions on the right. Double-click a tab to rename it.
 
 ## Install
 
 ```sh
 brew install herdr
-git clone https://github.com/nevambla/nevambla-code.git
+git clone https://github.com/JachinShen/nevambla-code.git
 cd nevambla-code
 ./install.sh
 ```
@@ -40,6 +41,7 @@ Open the herdr desktop app once before running it, so `~/.config/herdr-app` exis
 
 ### Optional tools
 
+- Path navigation and file transfers: `python3` locally and on each SSH machine, `hc`, and a working local SSH configuration. Transfers currently support individual regular files on Unix machines; SSH-to-SSH copies use a temporary local spool that is removed when finished.
 - PDF preview: `brew install poppler`
 - Notebooks: `pip install jupyter_client ipykernel` (the editor uses the project's nearest `.venv`, else `python3`)
 
@@ -48,8 +50,28 @@ Open the herdr desktop app once before running it, so `~/.config/herdr-app` exis
 As herdr asks for shared layouts:
 
 - **Network:** the title bar's usage meter (`vsc-titlebar/usage.sh`) reads your Claude Code login from the macOS Keychain and asks `api.anthropic.com` for your plan usage, the same data as Claude Code's `/usage`. The token stays inside that script. It is macOS only; elsewhere it shows no data.
-- **Programs:** the editor runs `python3` (notebooks, through `vsc-editor/kernel.py`), `pdftoppm` / `pdfinfo` (PDFs) and `open` (Open in Preview).
-- **Files:** the Explorer and editor read and save files in the folders your panes are in. PDF pages and notebook state are cached in `~/.config/herdr-app/data/vsc-editor/`.
+- **Programs:** path navigation and Git previews run `python3` and `git` on the selected machine through Herdr. Transfers use `hc machine ls` to resolve registered SSH targets and the local `/usr/bin/ssh` command, including the user’s SSH configuration. SSH command streams preserve the same filesystem namespace as the remote shell. Each copy checks size and SHA-256 before publication; an existing destination gets a numbered sibling. Errors remain visible. The editor runs `python3` (notebooks, through `vsc-editor/kernel.py`), `pdftoppm` / `pdfinfo` (PDFs) and `open` (Open in Preview).
+- **Files:** the Explorer and editor read and save files in the folders your panes are in. Temporary file-transfer payloads are staged locally or in the destination directory, then removed. Transfer destination preferences stay in local shared state. PDF pages and notebook state are cached in `~/.config/herdr-app/data/vsc-editor/`.
+
+## Fork development
+
+`origin` is `JachinShen/nevambla-code`; `upstream` is `nevambla/nevambla-code`. Keep source changes under `herdr-app/` and leave Herdr’s generated API declarations, local shared state, credentials and caches out of commits.
+
+Run the portable regressions from the checkout:
+
+```sh
+node --experimental-vm-modules --test herdr-app/mods/vsc-changes/tests/changes.test.mjs herdr-app/mods/vsc-editor/tests/diff.test.mjs herdr-app/mods/vsc-titlebar/tests/usage.test.mjs
+python3 -B -m unittest discover -s herdr-app/mods/vsc-explorer/tests -p 'test_*.py' -k Integrity
+```
+
+The transfer suite can also exercise real registered SSH targets. It creates and removes temporary fixtures on both machines:
+
+```sh
+python3 -B herdr-app/mods/vsc-explorer/tests/test_transfer.py --machines ssh-a ssh-b
+python3 -B herdr-app/mods/vsc-explorer/tests/test_download.py --machine ssh-a
+```
+
+Check each changed mod with `herdr-app check /absolute/path/to/mod`, then inspect it in the running app. Notebook dependencies are needed only when running notebook cells.
 
 ## Claude accounts in the title bar
 
@@ -78,6 +100,7 @@ The first account is the default. Hover or click **Claude** in the title bar to 
 
 | Keys | Action |
 | --- | --- |
+| ⌘⇧O | jump to a file or directory on the focused terminal’s machine |
 | ⌘B | show or hide the side bar |
 | ⌘J | show or hide the terminal panel |
 | ⌘⌥J | move the terminal panel between the bottom and the right |
@@ -96,8 +119,8 @@ Delete `~/.config/herdr-app/layouts/nevambla-code.json` and the `~/.config/herdr
 
 ## Contributing
 
-There's plenty left to improve: optimizations, new panels and features I haven't needed yet. Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), open an [issue](https://github.com/nevambla/nevambla-code/issues) or start a [discussion](https://github.com/nevambla/nevambla-code/discussions).
+There's plenty left to improve: optimizations, new panels and features I haven't needed yet. Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), open an [upstream issue](https://github.com/nevambla/nevambla-code/issues) or start an [upstream discussion](https://github.com/nevambla/nevambla-code/discussions).
 
 ## License
 
-[MIT](LICENSE). The font is JetBrains Mono patched by [Nerd Fonts](https://www.nerdfonts.com) (v3.4.0), under the SIL Open Font License 1.1 (`fonts/OFL.txt`).
+[MIT](LICENSE). The derived `vsc-changes` mod retains its [Apache-2.0 license](herdr-app/mods/vsc-changes/LICENSE) and [attribution](herdr-app/mods/vsc-changes/NOTICE). The font is JetBrains Mono patched by [Nerd Fonts](https://www.nerdfonts.com) (v3.4.0), under the SIL Open Font License 1.1 (`fonts/OFL.txt`).
