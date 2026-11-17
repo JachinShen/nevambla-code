@@ -48,7 +48,7 @@ export default class VscUsage extends View {
       .when(Boolean(d?.stale), el => el.child(div().text_size(11).text_color(t.dim)
         .child(`As of ${hhmm(d.at)}. Open ${cmd} to refresh.`)))
       .when(!d?.five_hour, el => el.child(div().text_size(11).text_color(t.dim)
-        .child(`No data yet. Open ${cmd} once so its login renews.`)));
+        .child(d?.error ? `Usage unavailable: ${d.error}. Open ${cmd} to check your login.` : `No data yet. Open ${cmd} once so its login renews.`)));
   }
 
   render() {

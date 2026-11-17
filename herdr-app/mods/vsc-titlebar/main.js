@@ -2,7 +2,7 @@
 // center (opens the command palette) and layout toggles on the right.
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { theme, run, spaces, layout, window, exec, appHome, shared, setShared, props, openOverlay, closeOverlay } from "herdr";
+import { theme, run, spaces, layout, window, exec, appHome, shared, setShared, props, openOverlay, closeOverlay, checking } from "herdr";
 
 // Claude accounts come from this block's props in the layout file, e.g.
 //   "content": { "mod": "vsc-titlebar", "props": { "accounts": [
@@ -45,6 +45,7 @@ function until(iso) {
 
 export default class VscTitlebar extends View {
   init(_p, cx) {
+    if (checking()) return;
     this.fetch(cx);
     cx.timer.every(300000, cx => this.fetch(cx));  // every 5 minutes
     // The clock and the countdowns change once a minute: redraw on the minute, not more often
@@ -53,21 +54,22 @@ export default class VscTitlebar extends View {
   }
 
   // Claude subscription usage for every account, from the same endpoint as Claude Code's /usage.
-  // Kept in shared "vsc.usage" (the dropdown reads it); a failed fetch keeps the last good
-  // values and marks them stale (a secondary account's login only renews while it runs).
+  // Kept in shared "vsc.usage" (the dropdown reads it). Failed requests show an explicit
+  // error instead of leaving an indefinite loading indicator or using an old reading.
   // Only configured accounts are kept, so a removed account disappears.
   fetch(cx) {
     cx.spawn(async cx => {
       const home = appHome().replace(/\/\.config\/herdr-app$/, "");
-      const prev = shared("vsc.usage") ?? {}, all = {};
+      const all = {};
       for (const { id, dir } of accounts()) {
-        if (prev[id]) all[id] = prev[id];
         try {
           const r = await exec("sh", [`${appHome()}/mods/vsc-titlebar/usage.sh`, dir.replace(/^~/, home)]);
+          if (r.code !== 0) throw new Error(`Usage helper failed (${r.code})`);
           const u = JSON.parse(r.stdout);
-          if (u.five_hour) all[id] = { five_hour: u.five_hour, seven_day: u.seven_day, at: Date.now(), stale: false };
-          else if (all[id]) all[id] = { ...all[id], stale: true };
-        } catch { if (all[id]) all[id] = { ...all[id], stale: true }; }
+          if (u.error) throw new Error(typeof u.error === "string" ? u.error : "Anthropic usage request failed");
+          if (!u.five_hour) throw new Error("Usage response missing five_hour");
+          all[id] = { five_hour: u.five_hour, seven_day: u.seven_day, at: Date.now(), stale: false };
+        } catch (e) { all[id] = { error: String(e.message ?? e), at: Date.now() }; }
       }
       setShared("vsc.usage", all);
       cx.notify();
@@ -109,10 +111,10 @@ export default class VscTitlebar extends View {
       .on_click((_e, cx) => { this.openPop(x, y); this.fetch(cx); })
       .child(div().font_semibold().text_color(CLAUDE).child("Claude"))
       .when(acc !== accs[0], el => el.child(div().text_color(t.dim).child(acc.name.toLowerCase())))
-      .when(Boolean(u), el => el
+      .when(Boolean(u?.five_hour), el => el
         .child(this.meter("u-session", "Session", u.five_hour, CLAUDE, t))
         .child(this.meter("u-week", "Week", u.seven_day, CLAUDE, t)))
-      .when(!u, el => el.child(div().text_color(t.dim).child("…")));
+      .when(!u?.five_hour, el => el.child(div().text_color(t.dim).child(u?.error ?? "Loading…")));
   }
 
   icon(id, file, on, action) {
