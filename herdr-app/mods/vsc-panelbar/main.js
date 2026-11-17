@@ -1,7 +1,7 @@
 // Terminal tabs start on the left, with panel actions on the right.
 import { View, div, svg } from "gpui-kit";
 import { h_flex, ScrollHandle } from "gpui-base";
-import { theme, run, spaces, layout, nextCommand, checking } from "herdr";
+import { theme, run, spaces, layout, nextCommand, checking, openOverlay } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -51,10 +51,14 @@ export default class VscPanelbar extends View {
         .children(tabs.map(x => h_flex().id(`pt-${x.id}`).flex_none().w(160).h_full().px(16).gap(8).items_center().cursor_pointer().relative()
           .border_r(1).border_color(t.border).bg(x.active ? t.surface : t.chrome)
           .text_color(x.active ? t.foreground : t.muted).hover(s => s.bg(x.active ? t.surface : t.hover).text_color(t.foreground))
-          .tooltip(`${x.name} · 双击重命名`)
+          .tooltip(`${x.name} · 双击重命名 · 右键菜单`)
           .on_click(() => run("tab.select", { id: x.id }))
           // Double-click renames, like Herdr's own tab bar (F2 renames the shown tab).
           .on_mouse_down("left", (e) => { if (e.click_count === 2) run("tab.rename", { id: x.id }); })
+          .on_mouse_down("right", (_e, cx) => {
+            cx.stop_propagation();
+            openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: x.id, space: space.id } } });
+          })
           .when(Boolean(DOT[x.status]), el => el.child(div().size(6).flex_none().rounded(3).bg(t[DOT[x.status]])))
           .child(div().flex_1().min_w(0).truncate().when(x.active, el => el.font_semibold()).child(x.name))
           .when(x.active, el => el.child(div().absolute().left(0).right(0).bottom(0).h(2).bg(t.accent)))))

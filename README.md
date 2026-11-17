@@ -22,7 +22,7 @@ JachinShen’s fork of [nevambla/nevambla-code](https://github.com/nevambla/neva
 - **Activity bar:** switches the side bar between Explorer, Changes and Spaces.
 - **Side bar:** the file tree of the focused pane’s folder, with your spaces and agents underneath. Git-ignored files and folders stay browsable with dimmed names and icons, locally and over SSH. Source Control follows the folder selected in Explorer; selecting a change opens a read-only diff tab in the main editor, including staged and unstaged changes against HEAD.
 - **Editor:** file tabs and an editable code view, with a second editor group to split into. It also previews Markdown and PDFs, runs Python files and runs Jupyter notebooks.
-- **Terminal panel:** your herdr terminals below the editor, with 160 px tabs aligned left, a new-tab button directly after them, and split, move and maximize actions on the right. Double-click a tab to rename it.
+- **Terminal panel:** your herdr terminals below the editor, with 160 px tabs aligned left, a new-tab button directly after them, and split, move and maximize actions on the right. Double-click a tab to rename it; right-click for Herdr's tab menu, including Close.
 
 ## Install
 
