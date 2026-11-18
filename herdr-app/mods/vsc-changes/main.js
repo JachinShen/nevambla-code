@@ -1,7 +1,8 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { exec, watchFolder, theme, checking, shared, setShared, layout, run } from "herdr";
+import { exec, watchFolder, theme, checking, run } from "herdr";
 import { location } from "./navigation.js";
+import { targetGroup, setActiveGroup, readEditor, writeEditor } from "./editor-state.js";
 import { fileIcon, ICON_FONT } from "./icons.js";
 const key = () => JSON.stringify(location());
 // Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
@@ -9,11 +10,6 @@ const key = () => JSON.stringify(location());
 const READ = ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "diff.autoRefreshIndex=false"];
 // Diff tabs have a separate identity from editable files, including their machine.
 const diffKey = (on, root, path) => `git-diff:${encodeURIComponent(JSON.stringify([on ?? null, root, path]))}`;
-function find(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) { const result = find(child, id); if (result) return result; }
-  return null;
-}
 
 export default class Changes extends View {
   init(_props, cx) {
@@ -98,15 +94,13 @@ export default class Changes extends View {
 
   pick(path, cx) {
     if (!this.root || this.context !== key() || !this.files.some(f => f.path === path)) return;
-    const group = shared("vsc.group") === 2 && find(layout(), "editor-2")?.hidden === false ? 2 : 1;
-    const editor = group === 2 ? "vsc.editor.2" : "vsc.editor";
-    const state = shared(editor) ?? { files: [], active: null };
+    const group = targetGroup(), state = readEditor(group);
     const id = diffKey(this.on, this.root, path);
     const file = { path: id, kind: "diff", sourcePath: `${this.root}/${path}`, root: this.root, on: this.on ?? null,
       relativePath: path, revision: `${Date.now()}-${this.revision = (this.revision ?? 0) + 1}` };
-    setShared(editor, { files: state.files.some(f => f.path === id)
-      ? state.files.map(f => f.path === id ? file : f) : [...state.files, file], active: id });
-    setShared("vsc.group", group);
+    writeEditor({ files: state.files.some(f => f.path === id)
+      ? state.files.map(f => f.path === id ? file : f) : [...state.files, file], active: id }, group);
+    setActiveGroup(group);
     run("layout.show", { id: "editor" });
     this.open = path;
     cx.notify();
@@ -149,8 +143,7 @@ export default class Changes extends View {
   render(cx) {
     if (!checking() && key() !== this.context) this.refresh(cx);
     const t = theme(), enabled = Boolean(this.message.trim() && this.root && !this.busy && !this.loading);
-    const editor = shared("vsc.group") === 2 && find(layout(), "editor-2")?.hidden === false ? "vsc.editor.2" : "vsc.editor";
-    const active = shared(editor)?.active;
+    const active = readEditor().active;
     const folder = this.root ?? this.cwd ?? "", name = folder.split("/").filter(Boolean).pop();
     return v_flex().id("changes").size_full().min_h(0).bg(t.chrome).text_color(t.foreground).text_size(13).track_focus(this.handle)
       .on_key_down((e, cx) => {

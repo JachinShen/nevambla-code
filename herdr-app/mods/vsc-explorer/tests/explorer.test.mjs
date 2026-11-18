@@ -35,7 +35,7 @@ async function harness(cwd, machine = null) {
     catch (e) { return { code: e.code, stdout: e.stdout ?? "", stderr: e.stderr ?? e.message }; }
   };
   const host = {
-    spaces: () => [{ active: true, folder: state.cwd, machine: state.machine }],
+    spaces: () => [{ id: "workspace", active: true, folder: state.cwd, machine: state.machine }],
     panes: () => [{ pane: "pane", cwd: state.cwd }], focused: () => ({ pane: "pane" }),
     shared: name => state.shared[name], setShared: (name, value) => { state.shared[name] = value; },
     layout: () => ({ id: "editor-2", hidden: true }), run() {}, checking: () => true,
@@ -124,7 +124,7 @@ test("Ignored rows keep file opening, directory expansion and transfers, with di
   assert.equal(file.nodes[1].styles.text_color, tints.dim);
   assert.equal(file.nodes[2].styles.text_color, tints.dim);
   file.handlers.on_click({}, cx);
-  assert.equal(state.shared["vsc.editor"].active, path.join(repo, "debug.log"));
+  assert.equal(state.shared["vsc.editor.space:workspace:1"].active, path.join(repo, "debug.log"));
   file.nodes[3].handlers.on_click({}, { stop_propagation() {} });
   assert.equal(state.overlays[0].props.source.path, path.join(repo, "debug.log"));
   const folder = view.row({ e: entry(view, "cache"), path: "cache", depth: 0 }, tints, null);

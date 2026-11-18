@@ -1,4 +1,5 @@
-import { spaces, panes, focused, shared, layout } from "herdr";
+import { spaces, panes, focused, shared } from "herdr";
+export { editorKey } from "./editor-state.js";
 
 export function findNode(node, id) {
   if (node?.id === id) return node;
@@ -8,8 +9,6 @@ export function findNode(node, id) {
   }
   return null;
 }
-
-export const editorKey = () => shared("vsc.group") === 2 && findNode(layout(), "editor-2")?.hidden === false ? "vsc.editor.2" : "vsc.editor";
 
 export function terminalLocation() {
   const space = spaces().find(s => s.active), focus = focused();

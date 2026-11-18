@@ -1,6 +1,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Input, InputState } from "gpui-base";
-import { checking, closeOverlay, exec, props, run, setShared, shared, spaces, panes, focused, layout, theme } from "herdr";
+import { checking, closeOverlay, exec, props, run, setShared, spaces, panes, focused, theme } from "herdr";
+import { targetGroup, readEditor, writeEditor } from "./editor-state.js";
 
 // Herdr isolates each mod's imports. Keep the shared-state source signature
 // ({cwd, on}) identical to the Explorer's navigation module.
@@ -12,14 +13,6 @@ function terminalLocation() {
     : space?.machine ?? null;
   return { cwd: pane?.cwd || focus?.cwd || space?.folder, on };
 }
-
-function findNode(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) { const found = findNode(child, id); if (found) return found; }
-  return null;
-}
-
-const editorKey = () => shared("vsc.group") === 2 && findNode(layout(), "editor-2")?.hidden === false ? "vsc.editor.2" : "vsc.editor";
 
 export const RESOLVE_PATH = String.raw`
 import json, os, re, shlex, socket, sys
@@ -81,7 +74,7 @@ export default class PathJump extends View {
     const path = this.input.value().trim();
     if (!path) { this.error = "请输入文件或目录路径"; cx.notify(); return; }
     if (!this.source.cwd) { this.error = "无法确定终端当前目录，请先聚焦目标终端后重试"; cx.notify(); return; }
-    const targetKey = editorKey();
+    const group = targetGroup();
     this.busy = true;
     this.error = null;
     cx.notify();
@@ -93,10 +86,10 @@ export default class PathJump extends View {
         if (typeof resolved.path !== "string" || !resolved.path.startsWith("/") || typeof resolved.folder !== "string" || typeof resolved.directory !== "boolean") throw new Error("路径检查未返回有效的文件信息");
         if (spaces().find(s => s.active)?.id !== this.space) throw new Error("当前工作区已切换，请在目标终端重新打开路径跳转");
         if (!resolved.directory) {
-          const editor = shared(targetKey) ?? { files: [], active: null };
+          const editor = readEditor(group, this.space);
           if (editor.files.some(file => file.path === resolved.path && (file.on ?? null) !== this.source.on)) throw new Error("该路径已在另一台机器的编辑标签页中打开，请先关闭那个标签页后重试");
           const files = editor.files.some(file => file.path === resolved.path) ? editor.files : [...editor.files, { path: resolved.path, root: resolved.folder, on: this.source.on }];
-          setShared(targetKey, { files, active: resolved.path });
+          writeEditor({ files, active: resolved.path }, group, this.space);
         }
         setShared("vsc.explorer.jump", { source: JSON.stringify(this.source), folder: resolved.folder, file: resolved.directory ? null : resolved.path, token: Date.now() });
         run("layout.show", { id: "side" });

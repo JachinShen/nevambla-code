@@ -1,18 +1,18 @@
 // VS Code-style editor area: file tabs, breadcrumbs and an editable code view.
-// Files come from shared "vsc.editor" ({files: [{path, root, on}], active}); the right side of a
-// split (props.group 2) uses "vsc.editor.2". Shared "vsc.group" is the side used last: the
-// Explorer opens files there and key commands act there.
+// Each Space remembers both editor groups and the group used last (editor-state.js).
+// In-memory document maps keep unsaved buffers alive when switching Spaces.
 // ⌘S saves (vsc-editor.save), ⌘W closes the file (vsc-editor.close).
 // .ipynb files open as notebooks (notebook.js): ⇧↩ runs the focused cell (vsc-editor.run).
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, TextView, ScrollHandle } from "gpui-base";
+import { v_flex, h_flex, Editor, EditorState, TextView, ScrollHandle, Popover } from "gpui-base";
 import { fileIcon, ICON_FONT } from "./icons.js";
 import { Notebook } from "./notebook.js";
 import { Pdf } from "./pdf.js";
 import { GitDiff } from "./diff.js";
 import { sourceLanguage } from "./source-syntax.js";
 import { SourcePreview } from "./source-preview.js";
-import { theme, shared, setShared, readTextFile, writeTextFile, nextCommand, settings, layout, exec, run, spaces, props } from "herdr";
+import { theme, readTextFile, writeTextFile, nextCommand, settings, layout, exec, run, spaces, props } from "herdr";
+import { currentSpace, activeGroup, setActiveGroup, readEditor, writeEditor } from "./editor-state.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -36,23 +36,38 @@ const base = p => p.split("/").pop();
 // Code font for files, notebook cells and outputs (ships with Herdr).
 const CODE_FONT = "JetBrains Mono";
 const isMd = p => ["md", "markdown", "mdx"].includes(ext(p));
-const keyOf = g => g === 2 ? "vsc.editor.2" : "vsc.editor";
-const activeGroup = () => shared("vsc.group") ?? 1;
 
 export default class VscEditor extends View {
-  state() { return shared(this.key) ?? { files: [], active: null }; }
-  setState(s) { setShared(this.key, s); }
+  activateSpace() {
+    const space = currentSpace();
+    if (this.space === space) return;
+    this.docsBySpace ??= new Map();
+    if (this.space != null) this.docsBySpace.set(this.space, this.docs);
+    this.space = space;
+    this.docs = this.docsBySpace.get(space) ?? new Map();
+    this.docsBySpace.set(space, this.docs);
+    this.drag = null; this.tabMenu = null; this.notice = null;
+    this.selectedTab = null; this.selectedIndex = null;
+    if (this.group === 1 && space) {
+      const split = readEditor(2).files.length > 0, panel = find(layout(), "editor-2");
+      if (panel && Boolean(panel.hidden) === split) run(split ? "layout.show" : "layout.hide", { id: "editor-2" });
+      if (!split && activeGroup() === 2) setActiveGroup(1);
+    }
+  }
+  state() { this.activateSpace(); return readEditor(this.group); }
+  setState(s) { writeEditor(s, this.group); }
 
   init(_p, cx) {
     this.group = props()?.group ?? 1;
-    this.key = keyOf(this.group);
+    this.docsBySpace = new Map();
     this.docs = new Map();
     this.tabScroll = ScrollHandle.new();
+    this.menuHandle = cx.focus_handle();
     this.wrap = narrow();
     // Notebooks: kernel state and running cells (only does work while a kernel is on).
     cx.timer.every(300, cx => { for (const d of this.docs.values()) if (d.nb) cx.spawn(async cx => d.nb.poll(cx)); });
     // Only the active diff is polled; it stays tied to its repository and machine.
-    cx.timer.every(10000, cx => this.docs.get(this.state().active)?.diff?.refresh(cx));
+    cx.timer.every(10000, cx => { const s = this.state(); this.docs.get(s.active)?.diff?.refresh(cx); });
     // PDFs: show pages as pdftoppm finishes them.
     cx.timer.every(600, cx => { for (const d of this.docs.values()) if (d.pdf && !d.pdf.done) cx.spawn(async cx => { if (await d.pdf.poll()) cx.notify(); }); });
     cx.spawn(async cx => {
@@ -60,16 +75,17 @@ export default class VscEditor extends View {
         const c = await nextCommand();
         // Every shown side gets each command; only the side used last acts (wrap applies to both).
         if (c !== "wrap" && c !== "nowrap" && activeGroup() !== this.group) continue;
-        if (c === "save") this.save(this.state().active, cx);
+        const s = this.state();
+        if (c === "save") this.save(s.active, cx);
         // Sent by vsc-panelbar when the terminals move: rebuild open files with the new wrap.
         if (c === "wrap" || c === "nowrap") {
           this.wrap = c === "wrap";
           for (const d of this.docs.values()) if (d.code && d.wrap !== this.wrap) this.build(d, d.code.value(), this.wrap);
         }
-        if (c === "close" && this.state().active) this.closeFile(this.state().active);
-        if (c === "runfile") { const d = this.docs.get(this.state().active); if (d && ext(d.file.path) === "py") await this.runPython(d, cx); }
-        if (c === "preview") this.togglePreview(this.docs.get(this.state().active));
-        if (c === "run") { const nb = this.docs.get(this.state().active)?.nb; if (nb?.focused) await nb.run(nb.focused, cx); }
+        if (c === "close" && s.active) this.closeFile(s.active);
+        if (c === "runfile") { const d = this.docs.get(s.active); if (d && ext(d.file.path) === "py") await this.runPython(d, cx); }
+        if (c === "preview") this.togglePreview(this.docs.get(s.active));
+        if (c === "run") { const nb = this.docs.get(s.active)?.nb; if (nb?.focused) await nb.run(nb.focused, cx); }
         cx.notify();
       }
     });
@@ -130,7 +146,7 @@ export default class VscEditor extends View {
           doc.original = text;
           this.build(doc, text, this.wrap);
         }
-      } catch { doc.error = "Can't open this file (too large or unreadable; the limit is 1 MiB)."; }
+      } catch (error) { doc.error = `Can't open this file: ${error.message ?? error}`; }
       finally { cx.notify(); }
     });
   }
@@ -155,18 +171,33 @@ export default class VscEditor extends View {
   }
 
   closeFile(path) {
-    const s = this.state(), i = s.files.findIndex(f => f.path === path);
-    const files = s.files.filter(f => f.path !== path);
-    const active = s.active === path ? (files[Math.min(i, files.length - 1)]?.path ?? null) : s.active;
+    this.closeFiles([path]);
+  }
+
+  closeOthers(path) {
+    const s = this.state();
+    if (!s.files.some(file => file.path === path)) return;
+    this.closeFiles(s.files.filter(file => file.path !== path).map(file => file.path), path);
+  }
+
+  closeFiles(paths, keepActive) {
+    const s = this.state(), i = s.files.findIndex(file => file.path === s.active), closing = new Set(paths);
+    const dirty = s.files.filter(file => closing.has(file.path) && this.docs.get(file.path)?.dirty);
+    dirty.forEach(file => closing.delete(file.path));
+    this.notice = dirty.length ? `Kept ${dirty.length} unsaved tab${dirty.length === 1 ? "" : "s"}. Save changes before closing.` : null;
+    const files = s.files.filter(file => !closing.has(file.path));
+    const active = keepActive ?? (closing.has(s.active) ? (files[Math.min(i, files.length - 1)]?.path ?? null) : s.active);
     this.setState({ files, active });
-    if (this.group === 2 && !files.length) { run("layout.hide", { id: "editor-2" }); setShared("vsc.group", 1); }
+    if (this.group === 2 && !files.length) { run("layout.hide", { id: "editor-2" }); setActiveGroup(1); }
   }
 
   sync(s, cx) {
+    const active = s.active ?? s.files[0]?.path;
     for (const f of s.files) {
       const doc = this.docs.get(f.path);
-      if (!doc) this.load(f, cx);
-      else if (doc.diff && doc.file.revision !== f.revision) {
+      // Restoring a large tab list must not start one read/kernel/PDF helper per tab.
+      if (!doc && f.path === active) this.load(f, cx);
+      else if (doc?.diff && f.path === active && doc.file.revision !== f.revision) {
         doc.file = f; doc.diff.refresh(cx);
       }
     }
@@ -177,7 +208,8 @@ export default class VscEditor extends View {
 
   tab(f, active, t) {
     const doc = this.docs.get(f.path), display = f.sourcePath ?? f.path, e = ext(display);
-    return h_flex().id(`tab-${f.path}`).h_full().flex_none().pl(12).pr(6).gap(6).items_center().cursor_pointer().relative()
+    const space = this.space;
+    const tab = h_flex().id(`tab-${f.path}`).h_full().flex_none().pl(12).pr(6).gap(6).items_center().cursor_pointer().relative()
       .bg(active ? t.background : t.chrome).border_r(1).border_color(t.border).text_color(active ? t.foreground : t.muted)
       .on_click(() => this.setState({ ...this.state(), active: f.path }))
       .on_mouse_down("left", e => { this.drag = { path: f.path, x: e.position.x, y: e.position.y, on: false }; })
@@ -189,22 +221,43 @@ export default class VscEditor extends View {
       .child(div().id(`x-${f.path}`).size(18).flex().items_center().justify_center().rounded(4).text_color(t.muted)
         .hover(s => s.bg(t.hover).text_color(t.foreground))
         .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { cx.stop_propagation(); this.closeFile(f.path); })
+        .on_click((_e, cx) => { cx.stop_propagation(); this.closeFile(f.path); cx.notify(); })
         .child(doc?.dirty ? div().size(8).rounded(4).bg(t.foreground) : svg("mods/vsc-editor/x.svg").size(13)));
+    const items = [["Close", () => this.closeFile(f.path)], ["Close Others", () => this.closeOthers(f.path)]];
+    const choose = (index, cx) => {
+      this.tabMenu = null;
+      if (currentSpace() === space) items[index]?.[1]();
+      cx.notify();
+    };
+    return Popover.new(`file-menu-${f.path}`).mouse_button("right").anchor("bottom_left")
+      .open(this.tabMenu === f.path).track_focus(this.menuHandle)
+      .on_open_change((open, cx) => { this.tabMenu = open ? f.path : null; this.menuAt = 0; cx.notify(); })
+      .trigger(tab)
+      .content(v_flex().id(`file-actions-${f.path}`).w(190).p(5).bg(t.popover).text_size(12.8)
+        .on_key_down((event, cx) => {
+          if (event.key === "down" || event.key === "up") this.menuAt = ((this.menuAt ?? 0) + 1) % items.length;
+          else if (event.key === "enter") choose(this.menuAt ?? 0, cx);
+          else return;
+          cx.stop_propagation(); cx.notify();
+        })
+        .children(items.map(([label], i) => div().id(`file-action-${i}`).h(31).px(8).flex().items_center().rounded(4)
+          .text_color(t.foreground).when(i === (this.menuAt ?? 0), el => el.bg(t.selected)).hover(el => el.bg(t.hover))
+          .cursor_pointer().on_click((_event, cx) => choose(i, cx)).child(label))));
   }
 
   // Quitting Herdr stops every notebook kernel.
   async close() {
-    for (const d of this.docs.values()) if (d.nb) await exec("sh", ["-c", 'kill "$(cat "$1/pid")" 2>/dev/null; true', "stop", d.nb.dir]);
+    const maps = new Set([this.docs, ...this.docsBySpace.values()]);
+    for (const docs of maps) for (const d of docs.values()) if (d.nb) await exec("sh", ["-c", 'kill "$(cat "$1/pid")" 2>/dev/null; true', "stop", d.nb.dir]);
   }
 
   // Split: the active file opens on the other side too (shown if hidden), and that side becomes active.
   split(path) {
-    const other = this.group === 1 ? 2 : 1, key = keyOf(other);
-    const s = shared(key) ?? { files: [], active: null }, f = this.state().files.find(x => x.path === path);
+    const other = this.group === 1 ? 2 : 1;
+    const s = readEditor(other), f = this.state().files.find(x => x.path === path);
     if (!f) return;
-    setShared(key, { files: s.files.some(x => x.path === path) ? s.files : [...s.files, f], active: path });
-    setShared("vsc.group", other);
+    writeEditor({ files: s.files.some(x => x.path === path) ? s.files : [...s.files, f], active: path }, other);
+    setActiveGroup(other);
     if (other === 2) run("layout.show", { id: "editor-2" });
   }
 
@@ -234,7 +287,7 @@ export default class VscEditor extends View {
     this.split(path);
     // The last file on the left is copied (the left side never ends up empty); otherwise it moves.
     if (!(this.group === 1 && only)) this.closeFile(path);
-    if (this.group === 2) setShared("vsc.group", 1);
+    if (this.group === 2) setActiveGroup(1);
   }
 
   dragOverlay(t) {
@@ -303,7 +356,7 @@ export default class VscEditor extends View {
     const mine = activeGroup() === this.group, split = !(find(layout(), "editor-2")?.hidden ?? true);
     return v_flex().id("editor").size_full().min_h(0).bg(t.background).text_color(t.foreground).text_size(13)
       // Clicking anywhere on this side makes it the one the Explorer and keys act on.
-      .on_mouse_down("left", () => { if (!mine) setShared("vsc.group", this.group); })
+      .on_mouse_down("left", () => { if (!mine) setActiveGroup(this.group); })
       .relative().on_size_change((size, cx) => { this.size = size; })
       .on_mouse_move((e, cx) => this.dragMove(e, cx))
       .on_mouse_up("left", (_e, cx) => this.dragEnd(cx))
@@ -337,12 +390,16 @@ export default class VscEditor extends View {
             .on_click((_e, cx) => { this.togglePreview(doc); cx.notify(); })
             .child(doc.preview ? "Edit  ⇧⌘V" : "Preview  ⇧⌘V"))))
       .when(Boolean(doc?.saveError), el => el.child(div().px(14).py(4).text_size(12).text_color(t.ansi1).child(doc.saveError)))
+      .when(Boolean(this.notice), el => el.child(div().px(14).py(4).text_size(12).text_color(t.blocked).child(this.notice)))
       .child(doc?.diff ? doc.diff.render(t)
         : doc?.pdf ? div().flex_1().min_h(0).child(doc.pdf.render(t))
         : doc?.nb ? div().flex_1().min_h(0).child(doc.nb.render(t))
         : doc?.code && doc.preview ? (doc.sourcePreview ? doc.sourcePreview.render(t) : this.markdown(doc, t))
         : doc?.code ? Editor.new(doc.code).flex_1().min_h(0)
-        : div().flex_1().p(16).text_color(t.dim).child(doc?.error ?? "Loading…"))
+        : v_flex().flex_1().p(16).gap(10).text_color(doc?.error ? t.ansi1 : t.dim).child(doc?.error ?? "Loading…")
+          .when(Boolean(doc?.error), el => el.child(div().id("retry-file").w(64).h(28).flex().items_center().justify_center().rounded(4)
+            .text_color(t.foreground).bg(t.surface).cursor_pointer().hover(style => style.bg(t.hover))
+            .on_click((_event, cx) => { this.load(f, cx); cx.notify(); }).child("Retry"))))
       .children(this.dragOverlay(t));
   }
 }

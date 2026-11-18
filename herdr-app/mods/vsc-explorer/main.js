@@ -1,10 +1,11 @@
 // VS Code-style Explorer: the focused pane's folder as a tree. Clicking a file
-// opens it in the vsc-editor block (shared "vsc.editor").
+// opens it in the current Space’s vsc-editor group.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { fileIcon, folderIcon, ICON_FONT } from "./icons.js";
 import { exec, watchFolder, theme, shared, setShared, layout, checking, run, openOverlay } from "herdr";
-import { findNode, editorKey, terminalLocation, browsingLocation as location } from "./navigation.js";
+import { findNode, terminalLocation, browsingLocation as location } from "./navigation.js";
+import { readEditor, writeEditor } from "./editor-state.js";
 import { gitRoot, withGitIgnores } from "./git.js";
 
 // Files open on the editor side used last (vsc-editor's split), while that side is shown.
@@ -110,9 +111,9 @@ export default class VscExplorer extends View {
 
   open(path) {
     const ctx = this.context, abs = join(ctx.cwd, path);
-    const key = editorKey(), ed = shared(key) ?? { files: [], active: null };
+    const ed = readEditor();
     const files = ed.files.some(f => f.path === abs) ? ed.files : [...ed.files, { path: abs, root: ctx.cwd, on: ctx.on ?? null }];
-    setShared(key, { files, active: abs });
+    writeEditor({ files, active: abs });
   }
 
   // The open tree as plain data; only the visible rows become elements.
@@ -164,7 +165,7 @@ export default class VscExplorer extends View {
       this.rootOpen = true;
       this.refresh(cx);
     }
-    const t = theme(), active = shared(editorKey())?.active;
+    const t = theme(), active = readEditor().active;
     const name = (this.context?.cwd ?? "").split("/").filter(Boolean).pop() ?? "";
     const items = this.rootOpen ? this.flatten("", 0, []) : [];
     const error = [this.error, ...this.folderErrors.values()].filter(Boolean).join("\n");

@@ -28,7 +28,7 @@ async function harness(cwd = "/home", machine = null) {
     set_value(value) { this.text = value; }
   }
   const host = {
-    spaces: () => [{ active: true, folder: state.cwd, machine: state.machine }],
+    spaces: () => [{ id: "workspace", active: true, folder: state.cwd, machine: state.machine }],
     panes: () => [{ pane: "pane", cwd: state.cwd }], focused: () => state.focus,
     shared: name => name === "vsc.explorer.jump" ? state.jump : state.shared[name],
     setShared: (name, value) => { state.shared[name] = value; },
@@ -109,7 +109,7 @@ test("Reproduces Home not being Git, then loads a real repository selected in Ex
   assert.equal(view.root, await realpath(repo));
   assert.equal(view.error, null);
   assert.equal(view.files[0].path, "example.txt");
-  assert.equal(state.shared["vsc.editor"], undefined); // Listing never opens a diff by itself.
+  assert.equal(state.shared["vsc.editor.space:workspace:1"], undefined); // Listing never opens a diff by itself.
   state.jump = null;
   await state.refresh();
   assert.equal(view.root, null);
@@ -168,9 +168,9 @@ test("Clicking a change opens a separate main editor diff and preserves editable
   const { state, view, cx } = await harness("/repo", "ssh-a");
   state.exec = async (_cmd, args) => ({ code: 0, stderr: "", stdout: args.includes("--show-toplevel") ? "/repo\n" : args.includes("status") ? " M file.txt\0" : "" });
   await state.refresh();
-  state.shared["vsc.editor"] = { files: [{ path: "/repo/file.txt", on: "ssh-a" }], active: "/repo/file.txt" };
+  state.shared["vsc.editor.space:workspace:1"] = { files: [{ path: "/repo/file.txt", on: "ssh-a" }], active: "/repo/file.txt" };
   view.pick("file.txt", cx);
-  const editor = state.shared["vsc.editor"], file = editor.files[1];
+  const editor = state.shared["vsc.editor.space:workspace:1"], file = editor.files[1];
   assert.equal(editor.files[0].path, "/repo/file.txt");
   assert.equal(file.kind, "diff");
   assert.equal(file.on, "ssh-a");
@@ -179,13 +179,13 @@ test("Clicking a change opens a separate main editor diff and preserves editable
   assert.notEqual(file.path, "/repo/file.txt");
   assert.deepEqual(plain(state.actions.at(-1)), ["layout.show", { id: "editor" }]);
   view.pick("file.txt", cx);
-  assert.equal(state.shared["vsc.editor"].files.length, 2);
-  assert.notEqual(state.shared["vsc.editor"].files[1].revision, file.revision);
+  assert.equal(state.shared["vsc.editor.space:workspace:1"].files.length, 2);
+  assert.notEqual(state.shared["vsc.editor.space:workspace:1"].files[1].revision, file.revision);
   state.machine = "ssh-b";
   await state.refresh();
   view.pick("file.txt", cx);
-  assert.equal(state.shared["vsc.editor"].files.length, 3);
-  assert.notEqual(state.shared["vsc.editor"].active, file.path);
+  assert.equal(state.shared["vsc.editor.space:workspace:1"].files.length, 3);
+  assert.notEqual(state.shared["vsc.editor.space:workspace:1"].active, file.path);
 });
 
 test("Diff opens in a visible second group, and rejects a stale directory click", async () => {
@@ -193,12 +193,12 @@ test("Diff opens in a visible second group, and rejects a stale directory click"
   state.exec = async (_cmd, args) => ({ code: 0, stderr: "", stdout: args.includes("--show-toplevel") ? "/repo\n" : args.includes("status") ? " D gone.txt\0" : "" });
   await state.refresh();
   state.layout.hidden = false;
-  state.shared["vsc.group"] = 2;
+  state.shared["vsc.group.space:workspace"] = 2;
   view.pick("gone.txt", cx);
-  assert.equal(state.shared["vsc.editor.2"].files[0].relativePath, "gone.txt");
-  assert.equal(state.shared["vsc.editor"], undefined);
-  const before = state.shared["vsc.editor.2"];
+  assert.equal(state.shared["vsc.editor.space:workspace:2"].files[0].relativePath, "gone.txt");
+  assert.equal(state.shared["vsc.editor.space:workspace:1"], undefined);
+  const before = state.shared["vsc.editor.space:workspace:2"];
   state.pin("/other");
   view.pick("gone.txt", cx);
-  assert.equal(state.shared["vsc.editor.2"], before);
+  assert.equal(state.shared["vsc.editor.space:workspace:2"], before);
 });

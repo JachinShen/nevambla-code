@@ -11,7 +11,7 @@ async function harness() {
   const context = vm.createContext({}), modules = new Map(), reads = [], writes = [];
   const ui = {
     View: class {}, div() {}, svg() {}, image() {}, h_flex() {}, v_flex() {}, v_virtual_list() {},
-    Editor: {}, TextView: {}, Scrollbar: {}, ScrollHandle: {},
+    Editor: {}, TextView: {}, Scrollbar: {}, ScrollHandle: {}, Popover: {},
     EditorState: { new(options) {
       return {
         options, text: options.value, value() { return this.text; },
