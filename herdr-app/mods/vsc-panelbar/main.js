@@ -1,6 +1,6 @@
 // One strip for native Herdr tabs, including file and terminal panes.
 import { View, div, svg } from "gpui-kit";
-import { h_flex, v_flex, ScrollHandle, Popover } from "gpui-base";
+import { h_flex, v_flex, ScrollHandle, Scrollbar, Popover } from "gpui-base";
 import { theme, run, spaces, panes, focused, checking, openOverlay, shared, setShared } from "herdr";
 import { filePanes, openFile, closeFileTab, closeOtherFiles } from "./files.js";
 import { readEditor } from "./legacy-files.js";
@@ -85,10 +85,12 @@ export default class VscPanelbar extends View {
     const pane = focused()?.pane;
     return v_flex().size_full().min_h(0)
       .child(h_flex().id("panelbar").flex_1().min_h(0).w_full().min_w(0).items_center().bg(t.chrome).text_size(14).border_b(1).border_color(t.border)
-        .child(h_flex().id("ptabs").flex_1().min_w(0).h_full().items_center().overflow_x_scrollbar().mode("always").track_scroll(this.scroll)
-          .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
-          .children(tabs.map(tab => this.tab(tab, space, files, t)))
-          .child(this.icon("p-new", "plus", "New terminal", () => run("tab.new", { space: space.id }))))
+        .child(div().flex_1().min_w(0).h_full().relative()
+          .child(h_flex().id("ptabs").w_full().min_w(0).h_full().pb(6).items_center().overflow_x_scroll().track_scroll(this.scroll)
+            .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
+            .children(tabs.map(tab => this.tab(tab, space, files, t)))
+            .child(this.icon("p-new", "plus", "New terminal", () => run("tab.new", { space: space.id }))))
+          .child(Scrollbar.horizontal("ptabs").absolute().inset_0().mode("always")))
         .when(Boolean(this.errors.get(space?.id)), el => el.child(div().id("restore-files").px(8).text_size(11).text_color(t.ansi1)
           .tooltip(this.errors.get(space.id)).cursor_pointer().on_click((_e, cx) => { this.errors.delete(space.id); this.migrate(space.id, cx); }).child("Restore files · Retry")))
         .child(h_flex().flex_none().px(8).gap(4).items_center()
