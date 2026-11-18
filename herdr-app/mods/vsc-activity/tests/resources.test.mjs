@@ -111,16 +111,16 @@ test("Rings show CPU percent and used GB, with independent 60/90 percent warning
   const find=(tree,id)=>all(tree).find(n=>n.styles.id===id);
   const text=tree=>all(tree).flatMap(n=>n.nodes.filter(v=>typeof v==="string")).join(" ");
   let tree=view.meters("chip",{});
-  assert.equal(text(tree),"CPU 25% MEM 8.0 GB");
-  assert.equal(find(tree,"host-cpu").styles.size,38);
+  assert.equal(text(tree),"25% 8.0 G");
+  assert.equal(find(tree,"host-cpu").styles.size,40);
   assert.equal(find(find(tree,"host-cpu"),"arc").styles.bg,"#8daec8");
   view.resources.states.set("chip",{value:{cpu:60,used:9,total:10},at:Date.now()});tree=view.meters("chip",{});
   assert.equal(find(find(tree,"host-cpu"),"arc").styles.bg,"#e3b341");
   assert.equal(find(find(tree,"host-memory"),"arc").styles.bg,"#ef5b5b");
   view.resources.states.set("chip",{error:"Probe disconnected",at:Date.now()});tree=view.meters("chip",{});
-  assert.match(tree.styles.tooltip,/Probe disconnected/);assert.equal(find(tree,"arc"),undefined);assert.equal(text(tree),"CPU ! MEM !");
+  assert.match(tree.styles.tooltip,/Probe disconnected/);assert.equal(find(tree,"arc"),undefined);assert.equal(text(tree),"! !");
   view.resources.states.set("chip",{value:{cpu:99,used:8,total:16},at:Date.now()-STALE-1});
-  assert.equal(text(view.meters("chip",{})),"CPU — MEM —");
+  assert.equal(text(view.meters("chip",{})),"— —");
   assert.match(view.meters(null,{}).styles.tooltip,/This computer/);
 });
 test("Warning thresholds include exactly 60 and 90 percent, with zero usage healthy",async()=>{

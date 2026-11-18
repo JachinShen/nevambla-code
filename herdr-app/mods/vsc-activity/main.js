@@ -71,30 +71,27 @@ export default class VscActivity extends View {
       : `${host} · Host resources · refreshes every 30 seconds\nYellow ≥ 60% · Red ≥ 90%`
         + (value ? `\nMemory: ${gib(value.used)} / ${gib(value.total)} GB (1024³ bytes)` : "")
         + (stale ? "\nReading expired · Refreshing…" : !value || value.cpu === null ? "\nCollecting CPU baseline…" : "");
-    const ring = (id, label, fraction, text, unit = "") => {
+    const ring = (id, label, fraction, text) => {
       const color = fraction == null ? t.muted : resourceColor(fraction);
-      const gauge = div().id(id).size(38).flex_none().relative().rounded(19).border(3).border_color(t.border)
-        .flex().items_center().justify_center()
-        .child(v_flex().items_center().justify_center().text_color(color)
-          .child(div().text_size(unit ? 10 : 11).font_medium().child(text))
-          .when(Boolean(unit), el => el.child(div().text_size(8).child(unit))));
+      const gauge = div().id(id).size(40).flex_none().relative().rounded(20).border(3).border_color(t.border)
+        .flex().items_center().justify_center().tooltip(`${label}\n${title}`)
+        .child(div().text_color(color).text_size(text.length > 6 ? 8 : text.length > 5 ? 9 : 11).font_medium().child(text));
       if (fraction > 0) {
-        const f = Math.max(0, Math.min(1, fraction)), path = PathBuilder.stroke(3).move_to(19, 1.5);
-        if (f === 1) path.arc_to(17.5, 17.5, 0, false, true, 19, 36.5).arc_to(17.5, 17.5, 0, false, true, 19, 1.5);
-        else path.arc_to(17.5, 17.5, 0, f > 0.5, true, 19 + Math.sin(f * Math.PI * 2) * 17.5, 19 - Math.cos(f * Math.PI * 2) * 17.5);
-        // Path coordinates are local to this 38 px box, independent of the rail's position.
-        gauge.child(window.paint_path(path.build(), color).absolute().top(-3).left(-3).size(38));
+        const f = Math.max(0, Math.min(1, fraction)), path = PathBuilder.stroke(3).move_to(20, 1.5);
+        if (f === 1) path.arc_to(18.5, 18.5, 0, false, true, 20, 38.5).arc_to(18.5, 18.5, 0, false, true, 20, 1.5);
+        else path.arc_to(18.5, 18.5, 0, f > 0.5, true, 20 + Math.sin(f * Math.PI * 2) * 18.5, 20 - Math.cos(f * Math.PI * 2) * 18.5);
+        // Path coordinates are local to this 40 px box, independent of the rail's position.
+        gauge.child(window.paint_path(path.build(), color).absolute().top(-3).left(-3).size(40));
       }
-      return v_flex().w_full().items_center().gap(3)
-        .child(div().text_size(9).text_color(t.muted).child(label)).child(gauge);
+      return gauge;
     };
     const empty = state?.error ? "!" : stale ? "—" : "…";
-    return v_flex().id("host-resources").w_full().h(124).flex_none().py(6).gap(8).tooltip(title)
+    return v_flex().id("host-resources").w_full().h(104).flex_none().py(8).gap(8).items_center().tooltip(title)
       .when(Boolean(state?.error), el => el.cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => {
         this.resourceAt.delete(on); this.refreshResources(cx);
       }))
-      .child(ring("host-cpu", "CPU", value?.cpu == null ? null : value.cpu / 100, value?.cpu == null ? empty : `${Math.round(value.cpu)}%`))
-      .child(ring("host-memory", "MEM", value ? value.used / value.total : null, value ? gib(value.used) : empty, value ? "GB" : ""));
+      .child(ring("host-cpu", "CPU usage", value?.cpu == null ? null : value.cpu / 100, value?.cpu == null ? empty : `${Math.round(value.cpu)}%`))
+      .child(ring("host-memory", "Memory used", value ? value.used / value.total : null, value ? `${gib(value.used)} G` : empty));
   }
 
   item(v, active, badge, action = () => pick(v.id)) {
