@@ -1,9 +1,9 @@
 // VS Code-style activity bar: picks what the side bar shows; clicking the
 // shown one again hides the side bar.
-import { View, div, svg, image } from "gpui-kit";
+import { View, div, svg, image, PathBuilder } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, run, layout, agents, spaces, machines, shared, setAgentOrder, nextCommand } from "herdr";
-import { Resources, INTERVAL, STALE } from "./resources.js";
+import { Resources, INTERVAL, STALE, gib, resourceColor } from "./resources.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -47,10 +47,11 @@ export default class VscActivity extends View {
   }
 
   refreshResources(cx) {
-    const on = spaces().find(s => s.active)?.machine;
-    if (!on) return;
-    const machine = machines().find(m => m.name === on && !m.temporary);
-    if (machine?.layout !== "ready") {
+    const space = spaces().find(s => s.active);
+    if (!space) return;
+    const on = space.machine ?? null;
+    const machine = on ? machines().find(m => m.name === on && !m.temporary) : null;
+    if (on && machine?.layout !== "ready") {
       if (this.resources.states.get(on)?.error !== "Machine is offline") { this.resources.offline(on); cx.notify(); }
       return;
     }
@@ -65,19 +66,35 @@ export default class VscActivity extends View {
   meters(on, t) {
     const state = this.resources.states.get(on), stale = state && Date.now() - state.at > STALE;
     const value = !state?.error && !stale ? state?.value : null;
-    const title = state?.error ? `${on} · Resources unavailable\n${state.error}\nClick to retry`
-      : `${on} · Linux host resources\nCPU and memory usage · refreshes every 30 seconds${!value || value.cpu === null ? "\nCollecting CPU baseline…" : ""}`;
-    const bar = (id, label, fraction) => v_flex().w_full().gap(3)
-      .child(div().text_size(9).text_color(t.muted).child(label))
-      .child(div().w_full().h(4).rounded(2).bg(t.border)
-        .when(fraction != null, el => el.child(div().id(id).w(Math.max(0, Math.min(1, fraction)) * 28).h(4).rounded(2)
-          .bg(fraction >= 0.9 ? "#ef5b5b" : "#8daec8"))));
-    return v_flex().id("host-resources").w_full().h(66).flex_none().px(10).py(6).gap(8).tooltip(title)
+    const host = on ?? "This computer";
+    const title = state?.error ? `${host} · Resources unavailable\n${state.error}\nClick to retry`
+      : `${host} · Host resources · refreshes every 30 seconds\nYellow ≥ 60% · Red ≥ 90%`
+        + (value ? `\nMemory: ${gib(value.used)} / ${gib(value.total)} GB (1024³ bytes)` : "")
+        + (stale ? "\nReading expired · Refreshing…" : !value || value.cpu === null ? "\nCollecting CPU baseline…" : "");
+    const ring = (id, label, fraction, text, unit = "") => {
+      const color = fraction == null ? t.muted : resourceColor(fraction);
+      const gauge = div().id(id).size(38).flex_none().relative().rounded(19).border(3).border_color(t.border)
+        .flex().items_center().justify_center()
+        .child(v_flex().items_center().justify_center().text_color(color)
+          .child(div().text_size(unit ? 10 : 11).font_medium().child(text))
+          .when(Boolean(unit), el => el.child(div().text_size(8).child(unit))));
+      if (fraction > 0) {
+        const f = Math.max(0, Math.min(1, fraction)), path = PathBuilder.stroke(3).move_to(19, 1.5);
+        if (f === 1) path.arc_to(17.5, 17.5, 0, false, true, 19, 36.5).arc_to(17.5, 17.5, 0, false, true, 19, 1.5);
+        else path.arc_to(17.5, 17.5, 0, f > 0.5, true, 19 + Math.sin(f * Math.PI * 2) * 17.5, 19 - Math.cos(f * Math.PI * 2) * 17.5);
+        // Path coordinates are local to this 38 px box, independent of the rail's position.
+        gauge.child(window.paint_path(path.build(), color).absolute().top(-3).left(-3).size(38));
+      }
+      return v_flex().w_full().items_center().gap(3)
+        .child(div().text_size(9).text_color(t.muted).child(label)).child(gauge);
+    };
+    const empty = state?.error ? "!" : stale ? "—" : "…";
+    return v_flex().id("host-resources").w_full().h(124).flex_none().py(6).gap(8).tooltip(title)
       .when(Boolean(state?.error), el => el.cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => {
         this.resourceAt.delete(on); this.refreshResources(cx);
       }))
-      .child(bar("host-cpu", "CPU", value?.cpu == null ? null : value.cpu / 100))
-      .child(bar("host-memory", "MEM", value ? value.used / value.total : null));
+      .child(ring("host-cpu", "CPU", value?.cpu == null ? null : value.cpu / 100, value?.cpu == null ? empty : `${Math.round(value.cpu)}%`))
+      .child(ring("host-memory", "MEM", value ? value.used / value.total : null, value ? gib(value.used) : empty, value ? "GB" : ""));
   }
 
   item(v, active, badge, action = () => pick(v.id)) {
@@ -120,7 +137,7 @@ export default class VscActivity extends View {
     const t = theme(), L = layout();
     const sideHidden = Boolean(find(L, "side")?.hidden);
     const open = !sideHidden && find(L, "agents-list")?.hidden === false;
-    const on = spaces().find(s => s.active)?.machine;
+    const space = spaces().find(s => s.active), on = space?.machine ?? null;
     if (this.resources) this.refreshResources(cx);
     const shown = sideHidden ? null : find(L, "side-body")?.active;
     const list = [...agents()].sort((a, b) => Number(b.pinned) - Number(a.pinned)
@@ -128,7 +145,7 @@ export default class VscActivity extends View {
     if (!open) setAgentOrder(list.map(a => a.address));
     return v_flex().id("activity").size_full().min_h(0).bg(t.chrome).border_r(1).border_color(t.border)
       .children(VIEWS.map(v => this.item(v, shown === v.id, 0)))
-      .when(Boolean(on), el => el.child(this.meters(on, t)))
+      .when(Boolean(space), el => el.child(this.meters(on, t)))
       .child(v_flex().flex_1().min_h(0).justify_end()
         // Scrollbar wrappers fill their box; bound that box so a short list stays at the bottom.
         .when(list.length > 0, el => el.child(div().w_full().min_h(0).max_h_full()

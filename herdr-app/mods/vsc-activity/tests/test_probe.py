@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 spec = importlib.util.spec_from_file_location('probe', Path(__file__).resolve().parents[1] / 'probe.py')
 probe = importlib.util.module_from_spec(spec)
@@ -53,10 +53,75 @@ class Probe(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             probe.snapshot(self.root)
 
-    def test_non_linux_hosts_report_unsupported(self):
-        with patch.object(probe.os, 'uname', return_value=SimpleNamespace(sysname='Darwin')):
-            with self.assertRaisesRegex(RuntimeError, 'require Linux'):
+    def test_unsupported_hosts_report_the_platform(self):
+        with patch.object(probe.os, 'uname', return_value=SimpleNamespace(sysname='Windows')):
+            with self.assertRaisesRegex(RuntimeError, 'got Windows'):
                 probe.snapshot(self.root)
+
+
+class MacProbe(unittest.TestCase):
+    VM = '''Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Anonymous pages: 400.
+Pages purgeable: 50.
+Pages wired down: 100.
+Pages occupied by compressor: 75.
+File-backed pages: 9999.
+Pages stored in compressor: 300.
+'''
+
+    def setUp(self):
+        self.vm = self.VM
+        self.info = '16777216\n8\n{ sec = 1000, usec = 123 } test\n'
+        for mock in (patch.object(probe.os, 'uname', return_value=SimpleNamespace(sysname='Darwin')),
+                     patch.object(probe, 'command', side_effect=lambda argv: self.vm if argv[0].endswith('vm_stat') else self.info),
+                     patch.object(probe, 'mac_cpu_ticks', return_value=(1000, 600))):
+            mock.start()
+            self.addCleanup(mock.stop)
+
+    def test_local_mac_memory_counts_app_wired_and_physical_compression_once(self):
+        value = probe.snapshot()
+        self.assertEqual(value['memory_total'] - value['memory_available'], (400 - 50 + 100 + 75) * 16384)
+        self.assertEqual(value['total_ticks'], 1000)
+        self.assertEqual(value['idle_ticks'], 600)
+        self.assertEqual(value['boot'], 'Darwin:1000:123')
+        self.assertEqual(value['cpus'], 8)
+
+    def test_missing_malformed_or_duplicate_vm_counters_fail(self):
+        for vm in (self.VM.replace('Pages purgeable: 50.\n', ''),
+                   self.VM.replace('Pages purgeable: 50.', 'Pages purgeable: broken.'),
+                   self.VM + 'Pages purgeable: 50.\n', self.VM.replace('16384 bytes', 'unknown bytes')):
+            self.vm = vm
+            with self.assertRaisesRegex(ValueError, 'macOS'):
+                probe.snapshot()
+
+    def test_impossible_memory_and_missing_boot_information_fail(self):
+        self.vm = self.VM.replace('Pages purgeable: 50.', 'Pages purgeable: 999.')
+        with self.assertRaisesRegex(ValueError, 'memory counters'):
+            probe.snapshot()
+        self.vm = self.VM
+        self.info = '16777216\n8\nunknown\n'
+        with self.assertRaisesRegex(ValueError, 'boot time'):
+            probe.snapshot()
+
+
+class MachProbe(unittest.TestCase):
+    def test_mach_layout_idle_index_and_errors(self):
+        def fill(host, flavor, ticks, count):
+            self.assertEqual(flavor, 3)
+            ticks[:] = [100, 200, 600, 100]
+            return 0
+        lib = SimpleNamespace(mach_host_self=Mock(return_value=1), host_statistics=Mock(side_effect=fill))
+        with patch.object(probe.ctypes, 'CDLL', return_value=lib):
+            self.assertEqual(probe.mac_cpu_ticks(), (1000, 600))
+            lib.host_statistics.side_effect = None
+            lib.host_statistics.return_value = 5
+            with self.assertRaisesRegex(RuntimeError, 'Mach status 5'):
+                probe.mac_cpu_ticks()
+
+    def test_command_failure_reports_stderr(self):
+        with patch.object(probe.subprocess, 'run', return_value=SimpleNamespace(returncode=1, stderr='permission denied', stdout='')):
+            with self.assertRaisesRegex(RuntimeError, 'permission denied'):
+                probe.command(['/usr/bin/vm_stat'])
 
 
 if __name__ == '__main__':

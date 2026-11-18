@@ -52,12 +52,12 @@ async function harness(list = []) {
       } else if (name === "layout.select") find(state.tree, args.stack).active = args.child;
     },
   };
-  const ui = { View: class {}, div: () => element(), h_flex: () => element(), v_flex: () => element(),
+  const ui = { View: class {}, PathBuilder: {}, div: () => element(), h_flex: () => element(), v_flex: () => element(),
     svg: asset => element("svg", asset), image: asset => element("image", asset) };
   async function load(relative) {
     const module = new vm.SourceTextModule(await readFile(new URL(relative, import.meta.url), "utf8"), { context });
     await module.link(name => {
-      const exports = name === "herdr" ? host : name === "./resources.js" ? {Resources: class {}, INTERVAL: 30000, STALE: 90000} : ui;
+      const exports = name === "herdr" ? host : name === "./resources.js" ? {Resources: class {}, INTERVAL: 30000, STALE: 90000, gib:()=>{}, resourceColor:()=>{}} : ui;
       return new vm.SyntheticModule(Object.keys(exports), function () {
         for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
       }, { context });

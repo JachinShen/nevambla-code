@@ -8,7 +8,7 @@ export function validate(value) {
     || ["total_ticks", "idle_ticks", "cpus", "memory_total", "memory_available"].some(k => !Number.isSafeInteger(value[k]) || value[k] < 0)
     || value.total_ticks <= 0 || value.idle_ticks > value.total_ticks || value.cpus < 1
     || value.memory_total <= 0 || value.memory_available > value.memory_total) {
-    throw new Error("Linux returned invalid host resource counters");
+    throw new Error("Host returned invalid host resource counters");
   }
   return value;
 }
@@ -18,7 +18,7 @@ export function usage(current, previous) {
   let cpu = null;
   if (previous?.boot === current.boot) {
     const total = current.total_ticks - previous.total_ticks, idle = current.idle_ticks - previous.idle_ticks;
-    if (total <= 0 || idle < 0 || idle > total) throw new Error("Linux CPU counters did not advance correctly");
+    if (total <= 0 || idle < 0 || idle > total) throw new Error("Host CPU counters did not advance correctly");
     cpu = (total - idle) / total * 100;
   }
   return { cpu, used: current.memory_total - current.memory_available,
@@ -26,13 +26,14 @@ export function usage(current, previous) {
 }
 
 export const gib = bytes => (bytes / 1073741824).toFixed(1);
+export const resourceColor = fraction => fraction >= 0.9 ? "#ef5b5b" : fraction >= 0.6 ? "#e3b341" : "#8daec8";
 
 export class Resources {
   constructor() { this.states = new Map(); this.pending = new Set(); }
   async script() {
     if (!this.source) {
       const source = await readTextFile(`${appHome()}/mods/vsc-activity/probe.py`);
-      if (typeof source !== "string" || !source.trim()) throw new Error("The Linux resource probe is missing");
+      if (typeof source !== "string" || !source.trim()) throw new Error("The host resource probe is missing");
       this.source = source;
     }
     return this.source;
@@ -40,13 +41,12 @@ export class Resources {
   offline(name) {
     if (!this.pending.has(name)) this.states.set(name, { error: "Machine is offline", at: Date.now() });
   }
-  async sample(name) {
-    if (!name) throw new Error("Host statistics require a remote machine");
+  async sample(name = null) {
     if (this.pending.has(name)) return;
     this.pending.add(name);
     try {
       const result = await exec("python3", ["-c", await this.script()], { on: name, timeout: 5000 });
-      if (result.code !== 0) throw new Error(result.stderr.trim() || `Linux resource probe failed (${result.code})`);
+      if (result.code !== 0) throw new Error(result.stderr.trim() || `Host resource probe failed (${result.code})`);
       const snapshot = validate(JSON.parse(result.stdout)), prior = this.states.get(name);
       const value = usage(snapshot, prior?.snapshot);
       this.states.set(name, { value, snapshot, at: Date.now() });
