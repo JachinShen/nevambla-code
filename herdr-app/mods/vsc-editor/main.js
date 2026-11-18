@@ -10,6 +10,8 @@ import { fileIcon, ICON_FONT } from "./icons.js";
 import { Notebook } from "./notebook.js";
 import { Pdf } from "./pdf.js";
 import { GitDiff } from "./diff.js";
+import { sourceLanguage } from "./source-syntax.js";
+import { SourcePreview } from "./source-preview.js";
 import { theme, shared, setShared, readTextFile, writeTextFile, nextCommand, settings, layout, exec, run, spaces, props } from "herdr";
 
 function find(node, id) {
@@ -66,7 +68,7 @@ export default class VscEditor extends View {
         }
         if (c === "close" && this.state().active) this.closeFile(this.state().active);
         if (c === "runfile") { const d = this.docs.get(this.state().active); if (d && ext(d.file.path) === "py") await this.runPython(d, cx); }
-        if (c === "preview") { const d = this.docs.get(this.state().active); if (d && isMd(d.file.path)) d.preview = !d.preview; }
+        if (c === "preview") this.togglePreview(this.docs.get(this.state().active));
         if (c === "run") { const nb = this.docs.get(this.state().active)?.nb; if (nb?.focused) await nb.run(nb.focused, cx); }
         cx.notify();
       }
@@ -78,9 +80,21 @@ export default class VscEditor extends View {
     doc.code?.release();
     const e = ext(doc.file.path);
     doc.wrap = wrap;
-    doc.code = EditorState.new({ language: LANG[e] ?? e ?? "txt", value: text, readonly: false, soft_wrap: wrap,
+    const language = sourceLanguage(doc.file.path);
+    if (language) {
+      doc.sourcePreview ??= new SourcePreview(doc.file, language, SYNTAX, CODE_FONT);
+      doc.preview ??= true;
+      if (doc.preview) doc.sourcePreview.update(text);
+    }
+    doc.code = EditorState.new({ language: language ? "txt" : LANG[e] ?? e ?? "txt", value: text, readonly: false, soft_wrap: wrap,
       font_family: CODE_FONT, font_size: 13, syntax: SYNTAX });
     doc.code.on("change", (_e, cx) => { const d = doc.code.value() !== doc.original; if (d !== doc.dirty) { doc.dirty = d; cx.notify(); } });
+  }
+
+  togglePreview(doc) {
+    if (!doc?.code || (!isMd(doc.file.path) && !doc.sourcePreview)) return;
+    doc.preview = !doc.preview;
+    if (doc.preview) doc.sourcePreview?.update(doc.code.value());
   }
 
   load(f, cx) {
@@ -310,17 +324,23 @@ export default class VscEditor extends View {
             .hover(st => st.bg(t.hover))
             .on_click((_e, cx) => { cx.spawn(async cx => this.runPython(doc, cx)); })
             .child("▶ Run").child(div().text_color(t.dim).child("⌥⌘R"))))
-        .when(isMd(f.path) && Boolean(doc?.code), el => el.child(div().flex_1()).child(
+        .when(Boolean(doc?.sourcePreview), el => el.child(div().flex_1()).child(
+          div().text_size(11).text_color(t.dim).child(`${doc.sourcePreview.language.name} · ${doc.preview ? "Read only" : "Plain text editing"}`)))
+        .when(Boolean(doc?.sourcePreview) && doc.preview, el => el.child(
+          div().id("source-copy").h(22).px(8).flex().items_center().rounded(4).cursor_pointer().tooltip("Copy the complete source")
+            .hover(st => st.bg(t.hover).text_color(t.foreground))
+            .on_click((_e, cx) => cx.write_to_clipboard(doc.code.value())).child("Copy")))
+        .when((isMd(f.path) || Boolean(doc?.sourcePreview)) && Boolean(doc?.code), el => el.when(!doc.sourcePreview, el => el.child(div().flex_1())).child(
           div().id("md-preview").h(22).px(8).flex().items_center().rounded(4).cursor_pointer()
             .bg(doc.preview ? t.selected : t.background).text_color(doc.preview ? t.foreground : t.muted)
             .hover(st => st.bg(t.hover).text_color(t.foreground))
-            .on_click((_e, cx) => { doc.preview = !doc.preview; cx.notify(); })
+            .on_click((_e, cx) => { this.togglePreview(doc); cx.notify(); })
             .child(doc.preview ? "Edit  ⇧⌘V" : "Preview  ⇧⌘V"))))
       .when(Boolean(doc?.saveError), el => el.child(div().px(14).py(4).text_size(12).text_color(t.ansi1).child(doc.saveError)))
       .child(doc?.diff ? doc.diff.render(t)
         : doc?.pdf ? div().flex_1().min_h(0).child(doc.pdf.render(t))
         : doc?.nb ? div().flex_1().min_h(0).child(doc.nb.render(t))
-        : doc?.code && doc.preview ? this.markdown(doc, t)
+        : doc?.code && doc.preview ? (doc.sourcePreview ? doc.sourcePreview.render(t) : this.markdown(doc, t))
         : doc?.code ? Editor.new(doc.code).flex_1().min_h(0)
         : div().flex_1().p(16).text_color(t.dim).child(doc?.error ?? "Loading…"))
       .children(this.dragOverlay(t));

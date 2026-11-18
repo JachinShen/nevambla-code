@@ -25,6 +25,8 @@ Left to right under a 45 px title bar, all in the `dracula` theme with JetBrains
 - **Terminal tabs:** double-click renames; clicking selects. Right-click opens Herdr's tab menu (Rename, New tab, Close), targeting the clicked tab without selecting it first. The active tab scrolls into view. The bar stays left aligned, with 160 px tabs and a + button immediately after the tabs.
 - **Panels:** ⌘B toggles the side bar, ⌘J the terminal panel, ⌘⌥J moves the terminal panel between the bottom and the right.
 
+- **Nix and IC previews:** Nix (.nix), Verilog/SystemVerilog (.v, .vh, .sv, .svh, .verilog), Verilog-A/AMS (.va, .vams), VHDL (.vhd, .vhdl), SPICE/CDL (.sp, .spi, .spice, .cir, .ckt, .cdl, .spf, .dspf, .net, .netlist) and Spectre (.scs, .spectre) open in a read-only highlighted view with virtual rows, horizontal scrolling and line numbers. The toolbar identifies the language and mode. Copy uses the complete original buffer, preserving tabs and line endings. Edit switches to native plain-text editing and Preview (also ⌘⇧V) re-highlights the current unsaved buffer. Grammar errors clear the old preview and show an explicit message with the Edit option. Tokenization runs locally for both local and SSH files, with bundled Prism and circuit-specific rules; it starts no helpers and performs no network requests.
+
 ## Built from
 
 - **Layout:** `layouts/nevambla-code.json`. Root column: `titlebar` block, then `body` row of `activity` block, `side` column (`side-body` stack of `explorer` / `changes` / `spaces`, then `agents-dock` column of `spaces-switch` and `agents-list`), and `work` column (`editor` row of `editor-1` and hidden `editor-2`, then `termpanel` column of `panelbar` and the `main` tab block).

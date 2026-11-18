@@ -22,6 +22,7 @@ JachinShen’s fork of [nevambla/nevambla-code](https://github.com/nevambla/neva
 - **Activity bar:** switches the side bar between Explorer, Changes and Spaces.
 - **Side bar:** the file tree of the focused pane’s folder, with your spaces and agents underneath. Git-ignored files and folders stay browsable with dimmed names and icons, locally and over SSH. Source Control follows the folder selected in Explorer; selecting a change opens a read-only diff tab in the main editor, including staged and unstaged changes against HEAD.
 - **Editor:** file tabs and an editable code view, with a second editor group to split into. It also previews Markdown and PDFs, runs Python files and runs Jupyter notebooks.
+- **Nix and IC source previews:** Nix, Verilog/SystemVerilog RTL and gate netlists, Verilog-A/AMS, VHDL, SPICE/CDL and Spectre open with colored tokens and line numbers. These previews are read-only; **Edit** opens the plain-text editor, and **Preview** (⇧⌘V) highlights the current buffer, including unsaved changes. **Copy** copies the complete source. Local and SSH files use the same bundled grammars, without extra tools.
 - **Terminal panel:** your herdr terminals below the editor, with 160 px tabs aligned left, a new-tab button directly after them, and split, move and maximize actions on the right. Double-click a tab to rename it; right-click for Herdr's tab menu, including Close.
 
 ## Install
@@ -60,7 +61,7 @@ As herdr asks for shared layouts:
 Run the portable regressions from the checkout:
 
 ```sh
-node --experimental-vm-modules --test herdr-app/mods/vsc-explorer/tests/explorer.test.mjs herdr-app/mods/vsc-changes/tests/changes.test.mjs herdr-app/mods/vsc-editor/tests/diff.test.mjs herdr-app/mods/vsc-titlebar/tests/usage.test.mjs
+node --experimental-vm-modules --test herdr-app/mods/vsc-explorer/tests/explorer.test.mjs herdr-app/mods/vsc-changes/tests/changes.test.mjs herdr-app/mods/vsc-editor/tests/diff.test.mjs herdr-app/mods/vsc-editor/tests/source.test.mjs herdr-app/mods/vsc-titlebar/tests/usage.test.mjs
 python3 -B -m unittest discover -s herdr-app/mods/vsc-explorer/tests -p 'test_*.py' -k Integrity
 ```
 
@@ -104,7 +105,7 @@ The first account is the default. Hover or click **Claude** in the title bar to 
 | ⌘B | show or hide the side bar |
 | ⌘J | show or hide the terminal panel |
 | ⌘⌥J | move the terminal panel between the bottom and the right |
-| ⌘⇧V | switch a Markdown file between editing and preview |
+| ⌘⇧V | switch Markdown, Nix or IC source between editing and preview |
 | ⌘⌥R | run the open Python file |
 | ⌘S / ⌘W | save / close the file (in the editor) |
 | ⇧↩ or ⌘↩ | run the notebook cell (in the editor) |
@@ -122,5 +123,7 @@ Delete `~/.config/herdr-app/layouts/nevambla-code.json` and the `~/.config/herdr
 There's plenty left to improve: optimizations, new panels and features I haven't needed yet. Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), open an [upstream issue](https://github.com/nevambla/nevambla-code/issues) or start an [upstream discussion](https://github.com/nevambla/nevambla-code/discussions).
 
 ## License
+
+The bundled Prism 1.30.0 tokenizer and Nix, Verilog and VHDL grammars use the [MIT license](herdr-app/mods/vsc-editor/vendor/prism-LICENSE). Circuit-netlist rules and the native preview renderer live in the editor mod.
 
 [MIT](LICENSE). The derived `vsc-changes` mod retains its [Apache-2.0 license](herdr-app/mods/vsc-changes/LICENSE) and [attribution](herdr-app/mods/vsc-changes/NOTICE). The font is JetBrains Mono patched by [Nerd Fonts](https://www.nerdfonts.com) (v3.4.0), under the SIL Open Font License 1.1 (`fonts/OFL.txt`).
