@@ -17,14 +17,15 @@ JachinShen’s fork of [nevambla/nevambla-code](https://github.com/nevambla/neva
 
 ## The layout
 
-- **Title bar:** a centered command center that opens the palette, side bar and editor toggles, and a clock.
+- **Title bar:** a centered command center that opens the palette, a side bar toggle, and a clock.
 - **Path navigation and transfers:** ⌘⇧O opens a local or remote terminal path in Explorer. The file tree’s transfer action copies a file between this computer and a registered SSH machine, or between two SSH machines. Completed transfers offer the full destination path for copying.
 - **Activity bar:** switches the side bar between Explorer, Changes and Spaces. Spaces are managed in that dedicated view. An Agents button sits immediately above Settings.
 - **Side bar:** the file tree of the focused pane’s folder, with room for an optional Agents panel below. Git-ignored files and folders stay browsable with dimmed names and icons, locally and over SSH. Source Control follows the folder selected in Explorer; selecting a change opens a read-only diff tab in the main editor, including staged and unstaged changes against HEAD.
 - **Agents:** the bottom-left button opens or hides the full list below the current sidebar view. Hidden by default, it leaves a compact scrollable rail with a small status light at the top-right of each agent icon. Click an icon to focus that agent, including agents on SSH machines; hover for its task, space and status. The button counts agents needing attention. Hiding the list preserves its size and gives the current view the room.
-- **Editor:** file tabs and an editable code view, with a second editor group to split into. Each Space remembers its own files, active tabs and split groups. Switching Spaces preserves unsaved buffers during the app session. Right-click a file tab for **Close** or **Close Others**; unsaved tabs stay open with a notice. Files load when selected, so restoring many tabs does not launch a read for every tab. Failed reads show the cause and a **Retry** button. The editor also previews Markdown and PDFs, runs Python files and runs Jupyter notebooks.
+- **Files and terminals:** share one native Herdr tab strip, with 160 px tabs aligned left and the + button immediately after them. An always-visible horizontal scrollbar appears when the tabs overflow. Double-click to rename. Each Space retains its own tabs, selection and native splits. File panes can be split, dragged beside terminals and zoomed with Herdr's own controls. Right-click a file tab for **Close** or **Close Others**; unsaved files stay open with a notice, and Close Others preserves terminal work. Existing file lists migrate automatically without changing the original saved lists. Files load only when visible; failed reads show the cause and **Retry**. Unsaved buffers are kept locally for recovery, and save conflicts preserve the edits. Local text files are editable; SSH text files are read-only because Herdr's write API is local only. The preview also handles Markdown and PDFs, runs Python files and runs Jupyter notebooks.
+- **Images:** PNG, JPEG, GIF, WebP, SVG and BMP previews work locally and over registered SSH connections. Fit, 1:1, zoom buttons and trackpad pinch preserve the aspect ratio. Images are checked before entering a content-addressed local cache; a corrupt cache hit shows an error. Limits are 64 MiB and 64 million pixels per image.
 - **Nix and IC source previews:** Nix, Verilog/SystemVerilog RTL and gate netlists, Verilog-A/AMS, VHDL, SPICE/CDL and Spectre open with colored tokens and line numbers. These previews are read-only; **Edit** opens the plain-text editor, and **Preview** (⇧⌘V) highlights the current buffer, including unsaved changes. **Copy** copies the complete source. Local and SSH files use the same bundled grammars, without extra tools.
-- **Terminal panel:** your herdr terminals below the editor, with 160 px tabs aligned left, a new-tab button directly after them, and split, move and maximize actions on the right. Double-click a tab to rename it; right-click for Herdr's tab menu, including Close.
+- **Pane controls:** split right, split down, zoom and close appear in each pane header. Splitting a file duplicates that preview; the tab bar's split buttons add terminals. Terminal tabs retain Herdr's right-click menu, including Rename and Close.
 
 ## Install
 
@@ -38,11 +39,12 @@ cd nevambla-code
 Open the herdr desktop app once before running it, so `~/.config/herdr-app` exists. The installer:
 
 - backs up anything it replaces to `~/.config/nevambla-code-backups/<time>/`
-- merges the shortcuts and never replaces a key you already use (it warns instead)
+- merges shortcuts, preserving personal bindings and warning on conflicts; the layout's earlier terminal-panel bindings migrate to the native pane controls
 - switches an open herdr window to the layout; otherwise pick **nevambla-code** in Settings → Look → Layout, or cycle with `ctrl-shift-l`
 
 ### Optional tools
 
+- Native file tabs and image previews: local `python3`, `hc` and `herdr-app`. Ordinary text previews do not need Jupyter.
 - Path navigation and file transfers: `python3` locally and on each SSH machine, `hc`, and a working local SSH configuration. Transfers currently support individual regular files on Unix machines; SSH-to-SSH copies use a temporary local spool that is removed when finished.
 - PDF preview: `brew install poppler`
 - Notebooks: `pip install jupyter_client ipykernel` (the editor uses the project's nearest `.venv`, else `python3`)
@@ -52,8 +54,8 @@ Open the herdr desktop app once before running it, so `~/.config/herdr-app` exis
 As herdr asks for shared layouts:
 
 - **Network:** when enabled with title bar `props.show_usage: true`, the usage meter (`vsc-titlebar/usage.sh`) reads your Claude Code login from the macOS Keychain and asks `api.anthropic.com` for your plan usage, the same data as Claude Code's `/usage`. The token stays inside that script. It is macOS only; elsewhere it shows no data.
-- **Programs:** path navigation and Git previews run `python3` and `git` on the selected machine through Herdr. Transfers use `hc machine ls` to resolve registered SSH targets and the local `/usr/bin/ssh` command, including the user’s SSH configuration. SSH command streams preserve the same filesystem namespace as the remote shell. Each copy checks size and SHA-256 before publication; an existing destination gets a numbered sibling. Errors remain visible. The editor runs `python3` (notebooks, through `vsc-editor/kernel.py`), `pdftoppm` / `pdfinfo` (PDFs) and `open` (Open in Preview).
-- **Files:** the Explorer and editor read and save files in the folders your panes are in. Temporary file-transfer payloads are staged locally or in the destination directory, then removed. Transfer destination preferences stay in local shared state. PDF pages and notebook state are cached in `~/.config/herdr-app/data/vsc-editor/`.
+- **Programs:** native file tabs are created through `herdr-app do tab.new`. Local Python uses the public `hc connect` document API to attach each file pane's actual ID to its persisted props; version checks preserve concurrent layout changes. Path navigation and Git previews run `python3` and `git` on the selected machine through Herdr. Transfers and SSH image previews use `hc machine ls` to resolve registered SSH targets and the local `/usr/bin/ssh` command, including the user's SSH configuration. SSH command streams preserve the same filesystem namespace as the remote shell and verify size and SHA-256. Transfers publish a numbered sibling if the destination exists. Errors remain visible. The editor also runs `python3` (notebooks, through `vsc-editor/kernel.py`), `pdftoppm` / `pdfinfo` (PDFs) and `open` (Open in Preview).
+- **Files:** the Explorer and editor read files on their captured source machine and save local files with a conflict check. Temporary file-transfer payloads are staged locally or in the destination directory, then removed. Destination preferences, file-pane metadata and recoverable unsaved buffers stay in local shared state. Images, PDF pages and notebook state are cached in `~/.config/herdr-app/data/vsc-editor/`.
 
 ## Fork development
 
@@ -64,6 +66,7 @@ Run the portable regressions from the checkout:
 ```sh
 node --experimental-vm-modules --test herdr-app/mods/vsc-activity/tests/activity.test.mjs herdr-app/mods/vsc-explorer/tests/explorer.test.mjs herdr-app/mods/vsc-changes/tests/changes.test.mjs herdr-app/mods/vsc-editor/tests/diff.test.mjs herdr-app/mods/vsc-editor/tests/source.test.mjs herdr-app/mods/vsc-editor/tests/tabs.test.mjs herdr-app/mods/vsc-titlebar/tests/usage.test.mjs
 python3 -B -m unittest discover -s herdr-app/mods/vsc-explorer/tests -p 'test_*.py' -k Integrity
+python3 -B -m unittest discover -s herdr-app/mods/vsc-editor/tests -p 'test_*.py'
 ```
 
 The transfer suite can also exercise real registered SSH targets. It creates and removes temporary fixtures on both machines:
@@ -105,8 +108,7 @@ The first account is the default. Hover or click **Claude** in the title bar to 
 | --- | --- |
 | ⌘⇧O | jump to a file or directory on the focused terminal’s machine |
 | ⌘B | show or hide the side bar |
-| ⌘J | show or hide the terminal panel |
-| ⌘⌥J | move the terminal panel between the bottom and the right |
+| ⌘J | zoom / restore the focused native pane |
 | ⌘⇧V | switch Markdown, Nix or IC source between editing and preview |
 | ⌘⌥R | run the open Python file |
 | ⌘S / ⌘W | save / close the file (in the editor) |

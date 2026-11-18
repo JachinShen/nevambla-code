@@ -1,14 +1,13 @@
 // VS Code-style Explorer: the focused pane's folder as a tree. Clicking a file
-// opens it in the current Space’s vsc-editor group.
+// opens it as a native tab in the current Space.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { fileIcon, folderIcon, ICON_FONT } from "./icons.js";
 import { exec, watchFolder, theme, shared, setShared, layout, checking, run, openOverlay } from "herdr";
 import { findNode, terminalLocation, browsingLocation as location } from "./navigation.js";
-import { readEditor, writeEditor } from "./editor-state.js";
+import { activeFile, currentSpace, openFile } from "./files.js";
 import { gitRoot, withGitIgnores } from "./git.js";
 
-// Files open on the editor side used last (vsc-editor's split), while that side is shown.
 const key = () => JSON.stringify(location());
 const join = (cwd, path) => `${cwd.replace(/\/+$/, "")}/${path}`;
 const PER_FOLDER = 500, TOTAL = 5000;
@@ -109,11 +108,14 @@ export default class VscExplorer extends View {
     cx.notify();
   }
 
-  open(path) {
-    const ctx = this.context, abs = join(ctx.cwd, path);
-    const ed = readEditor();
-    const files = ed.files.some(f => f.path === abs) ? ed.files : [...ed.files, { path: abs, root: ctx.cwd, on: ctx.on ?? null }];
-    writeEditor({ files, active: abs });
+  open(path, cx) {
+    const ctx = this.context, space = currentSpace();
+    const file = { path: join(ctx.cwd, path), root: ctx.cwd, on: ctx.on ?? null };
+    cx.spawn(async cx => {
+      try { await openFile(file, { space }); }
+      catch (e) { this.error = `Could not open file: ${e.message ?? e}`; }
+      cx.notify();
+    });
   }
 
   // The open tree as plain data; only the visible rows become elements.
@@ -139,7 +141,7 @@ export default class VscExplorer extends View {
     const [glyph, color] = e.dir ? folderIcon(open) : fileIcon(e.name);
     return h_flex().id(`f-${path}`).h(22).flex_none().pl(12 + depth * 12).pr(10).gap(5).items_center().cursor_pointer()
       .when(sel, el => el.bg(t.selected)).hover(s => s.bg(sel ? t.selected : t.hover))
-      .on_click((_e, cx) => e.dir ? this.toggle(path, cx) : this.open(path))
+      .on_click((_e, cx) => e.dir ? this.toggle(path, cx) : this.open(path, cx))
       .child(e.dir ? svg(`mods/vsc-explorer/chevron-${open ? "down" : "right"}.svg`).size(14).flex_none().text_color(e.ignored ? t.dim : t.muted)
                    : div().w(14).flex_none())
       .child(this.glyph([glyph, e.ignored ? t.dim : color]))
@@ -165,7 +167,8 @@ export default class VscExplorer extends View {
       this.rootOpen = true;
       this.refresh(cx);
     }
-    const t = theme(), active = readEditor().active;
+    const t = theme(), selected = activeFile();
+    const active = (selected?.on ?? null) === (this.context?.on ?? null) ? selected?.path : null;
     const name = (this.context?.cwd ?? "").split("/").filter(Boolean).pop() ?? "";
     const items = this.rootOpen ? this.flatten("", 0, []) : [];
     const error = [this.error, ...this.folderErrors.values()].filter(Boolean).join("\n");

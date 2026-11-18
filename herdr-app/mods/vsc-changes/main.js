@@ -2,7 +2,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
 import { exec, watchFolder, theme, checking, run } from "herdr";
 import { location } from "./navigation.js";
-import { targetGroup, setActiveGroup, readEditor, writeEditor } from "./editor-state.js";
+import { activeFile, currentSpace, openFile } from "./files.js";
 import { fileIcon, ICON_FONT } from "./icons.js";
 const key = () => JSON.stringify(location());
 // Reads write nothing under .git (no index refresh or lock, no fsmonitor cookie):
@@ -94,14 +94,15 @@ export default class Changes extends View {
 
   pick(path, cx) {
     if (!this.root || this.context !== key() || !this.files.some(f => f.path === path)) return;
-    const group = targetGroup(), state = readEditor(group);
+    const space = currentSpace();
     const id = diffKey(this.on, this.root, path);
     const file = { path: id, kind: "diff", sourcePath: `${this.root}/${path}`, root: this.root, on: this.on ?? null,
       relativePath: path, revision: `${Date.now()}-${this.revision = (this.revision ?? 0) + 1}` };
-    writeEditor({ files: state.files.some(f => f.path === id)
-      ? state.files.map(f => f.path === id ? file : f) : [...state.files, file], active: id }, group);
-    setActiveGroup(group);
-    run("layout.show", { id: "editor" });
+    cx.spawn(async cx => {
+      try { await openFile(file, { space }); }
+      catch (e) { this.note = `Could not open diff: ${e.message ?? e}`; }
+      cx.notify();
+    });
     this.open = path;
     cx.notify();
   }
@@ -143,7 +144,7 @@ export default class Changes extends View {
   render(cx) {
     if (!checking() && key() !== this.context) this.refresh(cx);
     const t = theme(), enabled = Boolean(this.message.trim() && this.root && !this.busy && !this.loading);
-    const active = readEditor().active;
+    const active = activeFile()?.path;
     const folder = this.root ?? this.cwd ?? "", name = folder.split("/").filter(Boolean).pop();
     return v_flex().id("changes").size_full().min_h(0).bg(t.chrome).text_color(t.foreground).text_size(13).track_focus(this.handle)
       .on_key_down((e, cx) => {

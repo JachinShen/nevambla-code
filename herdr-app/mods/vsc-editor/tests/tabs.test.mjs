@@ -5,14 +5,13 @@ import test from "node:test";
 
 const plain = value => JSON.parse(JSON.stringify(value));
 const file = (path, on = null) => ({ path, root: "/repo", on });
-const tabs = (...files) => ({ files, active: files.at(-1)?.path ?? null });
 function element(kind = "div") {
   const data = { kind, nodes: [], styles: {}, handlers: {} };
   const proxy = new Proxy(data, { get(target, key) {
     if (key in target) return target[key];
     return (...args) => {
-      if (key === "children") target.nodes.push(...args[0]);
-      else if (key === "child" || key === "content" || key === "trigger") target.nodes.push(args[0]);
+      if (["child", "content", "trigger"].includes(key)) target.nodes.push(args[0]);
+      else if (key === "children") target.nodes.push(...args[0]);
       else if (key === "when") { if (args[0]) args[1](proxy); }
       else if (key.startsWith("on_")) target.handlers[key] = args.at(-1);
       else target.styles[key] = args[0];
@@ -23,203 +22,175 @@ function element(kind = "div") {
 }
 const all = node => node && typeof node === "object" ? [node, ...(node.nodes ?? []).flatMap(all)] : [];
 const byId = (node, id) => all(node).find(item => item.styles.id === id);
-
 async function harness(saved = {}) {
-  const state = { space: "alpha", machine: null, folder: "/repo", saved, actions: [], pending: [], writes: [], reads: [] };
-  const second = { id: "editor-2", hidden: true };
-  const context = vm.createContext({}), modules = new Map();
-  const ui = {
-    View: class {}, div: element, svg: () => element("svg"), image: () => element("image"),
-    h_flex: element, v_flex: element, v_virtual_list: element, TextView: {}, Editor: {}, Scrollbar: {},
-    Popover: { new: () => element("popover") }, ScrollHandle: { new: () => ({ scroll_to_item() {} }) },
-    EditorState: { new: options => ({ value: () => options.value, on() {}, release() {} }) },
-  };
+  const state = { saved, actions: [], pending: [], reads: [], writes: [], created: 0, notices: [], space: "alpha",
+    spaces: ["alpha", "beta"].map(id => ({ id, tabs: [{id:id+"-terminal", active:true}], machine:null, folder:"/repo" })),
+    panes: ["alpha", "beta"].map(id => ({pane:id+"-shell",tab:id+"-terminal",terminal:id+"/t1",cwd:"/repo"})),
+    props: {}, text: "original\n" };
+  const ui = { View: class {}, div: element, svg: element, image: element, h_flex: element, v_flex: element, v_virtual_list: element,
+    Popover: {new:()=>element("popover")}, TextView:{markdown:element}, Scrollbar:{vertical:element}, Editor:{new:element},
+    ScrollHandle:{new:()=>({scroll_to_item(){}})},
+    EditorState:{new:options=>({options,text:options.value,value(){return this.text;},on(name,fn){this[name]=fn;},release(){this.released=true;}})} };
   const host = {
-    spaces: () => state.space ? [{ id: state.space, active: true, machine: state.machine, folder: state.folder, tabs: [] }] : [],
-    shared: key => state.saved[key], setShared: (key, value) => { state.saved[key] = value; },
-    layout: () => ({ id: "work", children: [second] }), props: () => ({}),
-    run: (name, args) => {
-      state.actions.push([name, plain(args)]);
-      if (args.id === second.id && ["layout.show", "layout.hide"].includes(name)) second.hidden = name === "layout.hide";
+    spaces: () => state.spaces.map(s=>({...s,active:s.id===state.space})), panes: () => state.panes,
+    focused: () => ({pane:state.focus??"alpha-shell"}), shared:key=>state.saved[key], setShared:(key,value)=>{state.saved[key]=value;},
+    props:()=>state.props, appHome:()=>"/app", theme:()=>({}), settings:()=>({}), checking:()=>false, layout:()=>({}), notify:v=>state.notices.push(v),
+    run:(name,args)=>{
+      state.actions.push([name,plain(args)]);
+      if(name==="tab.select") for(const s of state.spaces) if(s.tabs.some(t=>t.id===args.id)) for(const t of s.tabs)t.active=t.id===args.id;
+      if(name==="pane.focus") state.focus=args.pane;
+      if(name==="tab.close") { for(const s of state.spaces)s.tabs=s.tabs.filter(t=>t.id!==args.id); state.panes=state.panes.filter(p=>p.tab!==args.id); }
     },
-    readTextFile: async (path, options) => {
-      state.reads.push([path, options]);
-      if (state.readError) throw new Error(state.readError);
-      return "module top; endmodule";
+    exec:async(cmd,args)=>{
+      if(cmd==="python3") {
+        if(state.bindError)return {code:1,stderr:state.bindError,stdout:""};
+        state.props.preview_pane=state.bindPane;
+        return {code:0,stderr:"",stdout:'{"bound":1}'};
+      }
+      assert.equal(cmd,"env"); const request=JSON.parse(args.at(-1));
+      if(state.gate)await state.gate;
+      if(state.createError)return {code:1,stderr:state.createError,stdout:""};
+      const id=++state.created,tab="native-tab-"+id,pane="native-pane-"+id;
+      state.spaces.find(s=>s.id===request.space).tabs.push({id:tab,name:request.name,active:false});
+      state.panes.push({pane,tab,mod:request.mod,terminal:null,focused:false});
+      return {code:0,stderr:"",stdout:JSON.stringify({space:request.space,tab,pane})};
     },
-    writeTextFile: async (...args) => state.writes.push(args),
-    nextCommand: () => new Promise(() => {}), settings: () => ({}), exec() {}, appHome: () => "/app", theme: () => ({}),
+    readTextFile:async(path,options)=>{state.reads.push([path,plain(options)]);if(state.readError)throw new Error(state.readError);return state.text;},
+    writeTextFile:async(...args)=>{if(state.saveError)throw new Error(state.saveError);state.writes.push(plain(args));},
+    nextCommand:()=>new Promise(()=>{}), openOverlay(){},
   };
-  async function load(url) {
-    if (modules.has(url)) return modules.get(url);
-    const promise = (async () => {
-      const module = new vm.SourceTextModule(await readFile(new URL(url), "utf8"), { context, identifier: url });
-      await module.link((name, parent) => {
-        if (name.startsWith(".")) return load(new URL(name, parent.identifier).href);
-        const exports = name === "herdr" ? host : ui;
-        return new vm.SyntheticModule(Object.keys(exports), function () {
-          for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
-        }, { context });
-      });
-      return module;
-    })();
-    modules.set(url, promise);
-    return promise;
+  const context=vm.createContext({}),cache=new Map();
+  async function load(url){
+    if(cache.has(url))return cache.get(url);
+    const promise=(async()=>{
+      const mod=new vm.SourceTextModule(await readFile(new URL(url),"utf8"),{context,identifier:url});
+      await mod.link((name,parent)=>{
+        if(name.startsWith("."))return load(new URL(name,parent.identifier).href);
+        const exports=name==="herdr"?host:ui;
+        return new vm.SyntheticModule(Object.keys(exports),function(){for(const[k,v]of Object.entries(exports))this.setExport(k,v);},{context});
+      });return mod;
+    })();cache.set(url,promise);return promise;
   }
-  const main = await load(new URL("../main.js", import.meta.url).href);
-  await main.evaluate();
-  const session = (await load(new URL("../editor-state.js", import.meta.url).href)).namespace;
-  const cx = { notify() {}, stop_propagation() {}, spawn(fn) { state.pending.push(fn(cx)); } };
-  function view(group = 1) {
-    const editor = new main.namespace.default();
-    editor.group = group; editor.docs = new Map(); editor.docsBySpace = new Map();
-    editor.tabScroll = ui.ScrollHandle.new(); editor.menuHandle = {}; editor.wrap = false;
-    return editor;
+  async function namespace(relative){const m=await load(new URL(relative,import.meta.url).href);await m.evaluate();return m.namespace;}
+  const files=await namespace("../files.js"),Main=(await namespace("../main.js")).default;
+  const Bar=(await namespace("../../vsc-panelbar/main.js")).default;
+  const cx={notify(){},stop_propagation(){},focus_handle:()=>({focus(){}}),timer:{every(){},after(){}},spawn(fn){state.pending.push(fn(cx));}};
+  const settle=async()=>{while(state.pending.length)await Promise.all(state.pending.splice(0));};
+  function editor(opened){
+    state.props={file:opened.file,preview_pane:opened.pane.split("/").pop()};
+    const v=new Main();Object.assign(v,{file:opened.file,pane:opened.pane,space:opened.space,wrap:false,handle:{}});return v;
   }
-  return { state, second, session, view, cx, settle: async () => { await Promise.all(state.pending.splice(0)); } };
+  return {state,host,files,cx,settle,editor,bar:()=>{const b=new Bar();b.init(null,cx);return b;}};
 }
 
-test("Global tabs migrate once into one Space, preserving both groups and their active files", async () => {
-  const legacy = tabs(file("/repo/a.v", "chip"));
-  const saved = { "vsc.editor": legacy, "vsc.editor.2": tabs(file("/repo/b.nix")), "vsc.group": 2 };
-  const { state, session } = await harness(saved);
-  assert.deepEqual(plain(session.readEditor(1)), legacy);
-  assert.equal(session.readEditor(2).active, "/repo/b.nix");
-  assert.equal(session.activeGroup(), 2);
-  assert.strictEqual(saved["vsc.editor"], legacy);
-  state.space = "beta";
-  assert.deepEqual(plain(session.readEditor(1)), tabs());
-  assert.deepEqual(plain(session.readEditor(2)), tabs());
-  assert.equal(session.activeGroup(), 1);
-  session.writeEditor(tabs(file("/repo/a.v", "other")), 1);
-  state.space = "alpha";
-  assert.equal(session.readEditor(1).files[0].on, "chip");
-  assert.equal(saved["vsc.editor.migrated"], "alpha");
+test("File tabs deduplicate within a Space by machine and path, while native selection stays per Space",async()=>{
+  const {state,files}=await harness();
+  const a=await files.openFile(file("/repo/same.v"));
+  assert.equal((await files.openFile(file("/repo/same.v"))).pane,a.pane);
+  await files.openFile(file("/repo/same.v","chip"));
+  state.space="beta";await files.openFile(file("/repo/same.v"));
+  assert.equal(state.created,3);
+  assert.equal(files.filePanes("alpha").length,2);
+  assert.equal(files.filePanes("beta").length,1);
+  assert.equal(state.spaces[0].tabs.find(t=>t.active).id,"native-tab-2");
 });
-
-test("Each Space restores its tabs, selection and split after recreating editor views", async () => {
-  const { state, session, view, second } = await harness();
-  session.writeEditor(tabs(file("/repo/a.v"), file("/repo/b.v")), 1);
-  session.writeEditor(tabs(file("/repo/right.v")), 2);
-  session.setActiveGroup(2);
-  const editor = view(); editor.state();
-  assert.equal(second.hidden, false);
-  state.space = "beta"; editor.state();
-  assert.equal(second.hidden, true);
-  session.writeEditor(tabs(file("/repo/beta.nix")), 1);
-  const restarted = await harness(plain(state.saved));
-  assert.equal(restarted.session.readEditor(1).active, "/repo/b.v");
-  restarted.view().state();
-  assert.equal(restarted.second.hidden, false);
-  assert.equal(restarted.session.activeGroup(), 2);
-  restarted.state.space = "beta";
-  assert.equal(restarted.session.readEditor(1).active, "/repo/beta.nix");
+test("A creation finishing after a Space switch stays in its captured Space without stealing focus",async()=>{
+  const {state,files}=await harness();let release;state.gate=new Promise(r=>{release=r;});
+  const opening=files.openFile(file("/repo/a.txt"));state.space="beta";release();await opening;
+  assert.equal(state.actions.length,0);assert.equal(files.filePanes("alpha").length,1);
 });
-
-test("Switching Spaces retains separate unsaved buffers for identical file paths", async () => {
-  const { state, session, view } = await harness();
-  session.writeEditor(tabs(file("/repo/top.v", "chip-a")));
-  const editor = view(); editor.state();
-  const alpha = { dirty: true, code: { value: () => "alpha unsaved" } };
-  editor.docs.set("/repo/top.v", alpha);
-  state.space = "beta"; state.machine = "chip-b";
-  assert.equal(editor.state().files.length, 0);
-  assert.equal(editor.docs.size, 0);
-  session.writeEditor(tabs(file("/repo/top.v", "chip-b")));
-  const beta = { dirty: true, code: { value: () => "beta unsaved" } };
-  editor.docs.set("/repo/top.v", beta);
-  state.space = "alpha";
-  assert.equal(editor.state().files[0].on, "chip-a");
-  assert.strictEqual(editor.docs.get("/repo/top.v"), alpha);
-  state.space = "beta"; editor.state();
-  assert.strictEqual(editor.docs.get("/repo/top.v"), beta);
-  assert.equal(state.writes.length, 0);
+test("Duplicate clicks cannot create two panes and failed native commands remain retryable",async()=>{
+  const {state,files}=await harness();let release;state.gate=new Promise(r=>{release=r;});
+  const opening=files.openFile(file("/repo/a.txt"));
+  await assert.rejects(files.openFile(file("/repo/a.txt")),/already opening/);release();await opening;
+  state.gate=null;state.createError="Remote layout unavailable";
+  await assert.rejects(files.openFile(file("/repo/b.txt")),/Remote layout unavailable/);
+  state.createError=null;await files.openFile(file("/repo/b.txt"));assert.equal(state.created,2);
 });
-
-test("Right-click Close Others keeps the clicked tab and affects only its Space and editor group", async () => {
-  const { state, session, view, cx } = await harness();
-  session.writeEditor(tabs(file("/repo/keep.v"), file("/repo/close.md")), 1);
-  session.writeEditor(tabs(file("/repo/right.v")), 2);
-  session.writeEditor(tabs(file("/repo/other.v")), 1, "beta");
-  const editor = view(); editor.state();
-  const tab = editor.tab(file("/repo/keep.v"), false, {});
-  assert.equal(tab.styles.mouse_button, "right");
-  tab.handlers.on_open_change(true, cx);
-  assert.equal(editor.tabMenu, "/repo/keep.v");
-  byId(tab, "file-action-1").handlers.on_click({}, cx);
-  assert.deepEqual(plain(session.readEditor(1)), tabs(file("/repo/keep.v")));
-  assert.equal(session.readEditor(2).active, "/repo/right.v");
-  assert.equal(session.readEditor(1, "beta").active, "/repo/other.v");
-  assert.equal(editor.tabMenu, null);
-  assert.equal(state.writes.length, 0);
+test("A closed native pane never leaves a stale deduplication target",async()=>{
+  const {state,files}=await harness();const a=await files.openFile(file("/repo/a.txt"));
+  state.panes=state.panes.filter(p=>p.pane!==a.pane);await files.openFile(file("/repo/a.txt"));assert.equal(state.created,2);
 });
-
-test("Closing other tabs preserves unsaved edits visibly and releases closed notebook resources", async () => {
-  const { session, view, cx } = await harness();
-  const keep = file("/repo/keep.v"), dirty = file("/repo/dirty.v"), book = file("/repo/run.ipynb");
-  session.writeEditor(tabs(keep, dirty, book));
-  const editor = view(); editor.state();
-  editor.docs.set(keep.path, {}); editor.docs.set(dirty.path, { dirty: true });
-  const released = [];
-  editor.docs.set(book.path, { nb: { release: () => released.push("release"), shutdown: () => released.push("shutdown") } });
-  editor.closeOthers(keep.path);
-  assert.deepEqual(plain(session.readEditor().files), [keep, dirty]);
-  assert.equal(session.readEditor().active, keep.path);
-  assert.match(editor.notice, /1 unsaved tab/);
-  editor.sync(editor.state(), cx);
-  assert.deepEqual(released, ["release", "shutdown"]);
-  editor.closeFile(dirty.path);
-  assert.ok(session.readEditor().files.some(item => item.path === dirty.path));
+test("File splits pass captured props to Herdr's native split and do not create editor groups",async()=>{
+  const {state,files}=await harness();const opened=await files.openFile(file("/repo/a.v","chip"));
+  files.splitFile(opened.pane,"down");
+  assert.deepEqual(state.actions.at(-1),["pane.split",{pane:opened.pane,direction:"down",mod:"vsc-editor",props:{file:file("/repo/a.v","chip")}}]);
 });
-
-test("An open context menu cannot close matching tabs in a newly selected Space", async () => {
-  const { state, session, view, cx } = await harness();
-  const files = tabs(file("/repo/a.v"), file("/repo/b.v"));
-  session.writeEditor(files); session.writeEditor(files, 1, "beta");
-  const editor = view(); editor.state();
-  const menu = editor.tab(files.files[0], false, {});
-  state.space = "beta";
-  byId(menu, "file-action-1").handlers.on_click({}, cx);
-  assert.deepEqual(plain(session.readEditor()), files);
-  assert.deepEqual(plain(session.readEditor(1, "alpha")), files);
+test("Diff tabs retain a separate identity and refresh an existing pane instead of duplicating it",async()=>{
+  const {state,files}=await harness();await files.openFile(file("/repo/a.txt"));
+  const diff={...file("git-diff:a"),kind:"diff",sourcePath:"/repo/a.txt",relativePath:"a.txt",revision:"1"};
+  const d=await files.openFile(diff);await files.openFile({...diff,revision:"2"});
+  assert.equal(state.created,2);assert.equal(files.filePanes()[1].file.revision,"2");assert.equal(files.activeFile().path,diff.path);
 });
-
-test("Restoring many tabs reads only the selected file, and read failures retain their actual cause", async () => {
-  const { state, session, view, cx, settle } = await harness();
-  const files = Array.from({ length: 76 }, (_, i) => file(`/repo/file-${i}.v`, "chip"));
-  session.writeEditor(tabs(...files));
-  const editor = view(); editor.sync(editor.state(), cx); await settle();
-  assert.equal(state.reads.length, 1);
-  assert.equal(state.reads[0][0], files.at(-1).path);
-  assert.equal(state.reads[0][1].on, "chip");
-  state.readError = "herdr.exec: 16 execs are running already";
-  session.writeEditor({ files, active: files[0].path });
-  editor.sync(editor.state(), cx); await settle();
-  assert.equal(state.reads.length, 2);
-  assert.match(editor.docs.get(files[0].path).error, /16 execs are running already/);
-  state.readError = null;
-  editor.load(files[0], cx); await settle();
-  assert.equal(editor.docs.get(files[0].path).error, null);
-  assert.ok(editor.docs.get(files[0].path).code);
+test("Restoring many legacy tabs is lazy, preserves source lists, and does not change focus",async()=>{
+  const legacy={files:Array.from({length:76},(_,i)=>file(`/repo/a${i}.txt`)),active:"/repo/a75.txt"};
+  const {state,bar,cx,settle}=await harness({"vsc.editor.space:alpha:1":legacy});
+  bar().migrate("alpha",cx);await settle();
+  assert.equal(state.created,76);assert.equal(state.reads.length,0);assert.equal(state.actions.length,0);
+  assert.strictEqual(state.saved["vsc.editor.space:alpha:1"],legacy);assert.equal(state.saved["vsc.files.migrated:alpha"],true);
 });
-
-test("Corrupt saved tabs raise explicit errors without overwriting state or partially migrating", async () => {
-  const saved = { "vsc.editor": tabs(file("/repo/good.v")), "vsc.editor.2": { files: "broken", active: null } };
-  const before = plain(saved), { session } = await harness(saved);
-  assert.throws(() => session.readEditor(), /Invalid saved editor tabs/);
-  assert.deepEqual(saved, before);
-  saved["vsc.editor.2"] = tabs();
-  session.readEditor();
-  saved[session.editorKey(1)] = { files: [file("/repo/a.v")], active: "/missing" };
-  assert.throws(() => session.readEditor(), /Invalid saved editor tabs/);
+test("Malformed legacy state reports an error before partial migration and stays untouched",async()=>{
+  const bad={files:"invalid",active:null},saved={"vsc.editor.space:alpha:1":{files:[file("/a.txt")],active:"/a.txt"},"vsc.editor.space:alpha:2":bad};
+  const {state,bar,cx,settle}=await harness(saved);const b=bar();b.migrate("alpha",cx);await settle();
+  assert.equal(state.created,0);assert.match(b.errors.get("alpha"),/Invalid saved editor tabs/);assert.strictEqual(saved["vsc.editor.space:alpha:2"],bad);
 });
-
-test("All four mod copies share the same persisted editor contract; no active Space rejects writes", async () => {
-  const canonical = await readFile(new URL("../editor-state.js", import.meta.url), "utf8");
-  for (const mod of ["vsc-explorer", "vsc-changes", "vsc-jump"]) {
-    assert.equal(await readFile(new URL(`../../${mod}/editor-state.js`, import.meta.url), "utf8"), canonical);
-  }
-  const { state, session } = await harness(); state.space = null;
-  assert.deepEqual(plain(session.readEditor()), tabs());
-  assert.throws(() => session.writeEditor(tabs(file("/repo/a.v"))), /No active Space/);
+test("Inactive file panes do not read files; read failures surface and recover on retry",async()=>{
+  const {state,files,editor,cx,settle}=await harness();const opened=await files.openFile(file("/repo/a.txt"),{focus:false});
+  const view=editor(opened);view.render(cx);await settle();assert.equal(state.reads.length,0);
+  state.spaces[0].tabs.forEach(t=>t.active=t.id===opened.tab);state.readError="permission denied";
+  let tree=view.render(cx);await settle();tree=view.render(cx);assert.match(view.doc.error,/permission denied/);
+  state.readError=null;byId(tree,"retry-file").handlers.on_click({},cx);await settle();assert.equal(view.doc.code.value(),state.text);
+});
+test("Content mods without an injected pane ID attach through persisted native metadata",async()=>{
+  const {state,files,editor,cx,settle}=await harness();const opened=await files.openFile(file("/repo/a.txt"));
+  const view=editor(opened);delete state.props.preview_pane;state.bindPane=opened.pane;
+  view.render(cx);await settle();view.render(cx);await settle();
+  assert.equal(view.pane,opened.pane);assert.equal(view.doc.code.value(),state.text);
+});
+test("Failed native pane attachment shows its real error and offers an explicit retry",async()=>{
+  const {state,files,editor,cx,settle}=await harness();const opened=await files.openFile(file("/repo/a.txt"));
+  const view=editor(opened);delete state.props.preview_pane;state.bindPane=opened.pane;state.bindError="Remote layout unavailable";
+  view.render(cx);await settle();const tree=view.render(cx);
+  assert.match(view.bindingError,/Remote layout unavailable/);assert.equal(state.reads.length,0);
+  state.bindError=null;byId(tree,"retry-pane").handlers.on_click({},cx);view.render(cx);await settle();view.render(cx);await settle();
+  assert.equal(view.doc.code.value(),state.text);
+});
+test("Close Others preserves unsaved files, terminal work and other Spaces",async()=>{
+  const {state,files}=await harness();const a=await files.openFile(file("/a.txt")),b=await files.openFile(file("/b.txt")),c=await files.openFile(file("/c.txt"));
+  state.space="beta";await files.openFile(file("/d.txt"));files.setFileDirty(b.pane,true);state.actions=[];
+  files.closeOtherFiles(a.tab,"alpha");assert.deepEqual(state.actions,[["tab.close",{id:c.tab}]]);
+  assert.equal(files.closeFileTab(b.tab),false);assert.match(state.notices.at(-1).body,/Save/);
+});
+test("Unsaved edits survive pane recreation, save conflicts keep buffers, and successful saves clear them",async()=>{
+  const {state,files,editor,cx,settle}=await harness();const a=await files.openFile(file("/repo/a.txt"));const first=editor(a);
+  first.load(a.file,cx);await settle();first.doc.code.text="unsaved\n";first.doc.code.change({},cx);
+  await first.close();const second=editor(a);second.load(a.file,cx);await settle();
+  assert.equal(second.doc.code.value(),"unsaved\n");assert.equal(second.doc.dirty,true);
+  state.saveError="file changed on disk";assert.equal(await second.save(cx),false);assert.match(second.doc.saveError,/file changed on disk/);
+  assert.ok(state.saved[files.bufferKey("alpha",a.file)]);state.saveError=null;assert.equal(await second.save(cx),true);
+  assert.deepEqual(state.writes,[["/repo/a.txt","unsaved\n","original\n"]]);assert.equal(state.saved[files.bufferKey("alpha",a.file)],null);
+});
+test("Corrupt recovered buffers and metadata are explicit errors and are never discarded on close",async()=>{
+  const {state,files,editor,cx,settle}=await harness();const a=await files.openFile(file("/repo/a.txt")),key=files.bufferKey("alpha",a.file);
+  const corrupt={text:17};state.saved[key]=corrupt;const v=editor(a);v.load(a.file,cx);await settle();await v.close();
+  assert.match(v.doc.error,/Invalid saved unsaved buffer/);assert.strictEqual(state.saved[key],corrupt);
+  state.saved["vsc.file-panes"]=[];assert.throws(()=>files.filePanes(),/Invalid saved file pane index/);
+});
+test("Clean native splits cannot erase sibling edits and divergent split buffers recover independently",async()=>{
+  const {state,files,editor,cx,settle}=await harness();const a=await files.openFile(file("/repo/a.txt"));
+  const first=editor(a);first.load(a.file,cx);await settle();
+  const copy={...a,pane:"copy-pane"};state.panes.push({pane:copy.pane,tab:a.tab,mod:"vsc-editor"});files.registerFile(a.file,copy.pane);
+  const second=editor(copy);second.load(a.file,cx);await settle();
+  first.doc.code.text="first edit";first.doc.code.change({},cx);await second.close();
+  assert.equal(state.saved[files.bufferKey("alpha",a.file)].text,"first edit");
+  second.doc.code.text="second edit";second.doc.code.change({},cx);await first.close();
+  const recoveredFirst=editor(a);recoveredFirst.load(a.file,cx);await settle();
+  const recoveredCopy=editor(copy);recoveredCopy.load(a.file,cx);await settle();
+  assert.equal(recoveredFirst.doc.code.value(),"first edit");assert.equal(recoveredCopy.doc.code.value(),"second edit");
+});
+test("Mod-local helpers and SSH download verification remain identical across consumers",async()=>{
+  const helper=await readFile(new URL("../files.js",import.meta.url),"utf8");
+  for(const mod of ["vsc-explorer","vsc-changes","vsc-jump","vsc-panelbar","vsc-pane"])
+    assert.equal(await readFile(new URL(`../../${mod}/files.js`,import.meta.url),"utf8"),helper);
+  assert.equal(await readFile(new URL("../download.py",import.meta.url),"utf8"),await readFile(new URL("../../vsc-explorer/download.py",import.meta.url),"utf8"));
 });

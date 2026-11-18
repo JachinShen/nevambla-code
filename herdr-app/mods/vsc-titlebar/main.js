@@ -148,7 +148,6 @@ export default class VscTitlebar extends View {
         .child(div().truncate().child(title)))
       .child(h_flex().flex_1().min_w(0).h_full().pr(10).gap(2).items_center().justify_end()
         .child(this.icon("t-side", "panel-left", !find(L, "side")?.hidden, () => run("layout.toggle", { id: "side" })))
-        .child(this.icon("t-panel", "panel-bottom", !find(L, "editor")?.hidden, () => run("layout.toggle", { id: "editor" })))
         .child(div().pl(12).text_color(t.foreground).child(clock())));
   }
 }

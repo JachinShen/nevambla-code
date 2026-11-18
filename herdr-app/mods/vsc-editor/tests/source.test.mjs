@@ -23,7 +23,7 @@ async function harness() {
     readTextFile: async (path, options) => { reads.push({ path, options }); return host.text; },
     writeTextFile: async (...args) => { writes.push(args); }, theme() {}, shared() {}, setShared() {},
     nextCommand() {}, settings() {}, layout() {}, exec() {}, run() {}, spaces() {}, props() {},
-    appHome() {},
+    appHome() {}, panes: () => [], focused() {}, notify() {}, checking: () => false,
   };
   async function load(url) {
     if (modules.has(url)) return modules.get(url);
@@ -48,7 +48,7 @@ async function harness() {
   const preview = (await load(new URL("../source-preview.js", import.meta.url).href)).namespace;
   const pending = [], cx = { notify() {}, spawn(fn) { pending.push(fn(cx)); } };
   const view = new editor.namespace.default();
-  view.docs = new Map(); view.wrap = false;
+  view.space = "space"; view.file = {path:"/project/chip.nix"}; view.wrap = false;
   return { ...syntax, ...preview, view, host, reads, writes, cx,
     async settle() { await Promise.all(pending.splice(0)); } };
 }
@@ -160,10 +160,10 @@ test("Local and SSH reads use the captured machine, and preview uses the unsaved
     const file = { path: "/project/chip.nix", root: "/project", on };
     view.load(file, cx);
     await settle();
-    const doc = view.docs.get(file.path);
+    const doc = view.doc;
     assert.deepEqual(plain(reads), [{ path: file.path, options: { on } }]);
     assert.equal(doc.preview, true);
-    assert.equal(doc.code.options.readonly, false);
+    assert.equal(doc.code.options.readonly, Boolean(on));
     assert.equal(sourceText(doc.sourcePreview.rows), host.text.replace(/\r\n/g, "\n"));
     view.togglePreview(doc);
     assert.equal(doc.preview, false);
@@ -174,7 +174,7 @@ test("Local and SSH reads use the captured machine, and preview uses the unsaved
     assert.equal(sourceText(doc.sourcePreview.rows), doc.code.value().replace(/\r\n/g, "\n"));
     assert.equal(doc.original, host.text);
     if (!on) {
-      view.save(file.path, cx);
+      await view.save(cx);
       await settle();
       assert.deepEqual(plain(writes), [[file.path, doc.code.value(), host.text]]);
       assert.equal(doc.dirty, false);

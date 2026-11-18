@@ -31,13 +31,15 @@ function uiElement() {
 async function harness(cwd, machine = null) {
   const state = { cwd, machine, calls: [], pending: [], shared: {}, overlays: [] };
   state.exec = async (cmd, args, options) => {
-    try { return { code: 0, ...await run(cmd, args, { cwd: options.cwd }) }; }
+    if (cmd === "env") return {code:0,stderr:"",stdout:JSON.stringify({space:"workspace",tab:"native-tab",pane:"native-pane"})};
+    try { return { code: 0, ...await run(cmd, args, { cwd: options?.cwd }) }; }
     catch (e) { return { code: e.code, stdout: e.stdout ?? "", stderr: e.stderr ?? e.message }; }
   };
   const host = {
-    spaces: () => [{ id: "workspace", active: true, folder: state.cwd, machine: state.machine }],
+    spaces: () => [{ id: "workspace", active: true, folder: state.cwd, machine: state.machine, tabs: [{id:"native-tab"}] }],
     panes: () => [{ pane: "pane", cwd: state.cwd }], focused: () => ({ pane: "pane" }),
     shared: name => state.shared[name], setShared: (name, value) => { state.shared[name] = value; },
+    appHome: () => "/app", notify() {},
     layout: () => ({ id: "editor-2", hidden: true }), run() {}, checking: () => true,
     exec: (...args) => { state.calls.push(args); return state.exec(...args); },
     watchFolder: async () => { throw new Error("Watching is outside these regression tests"); },
@@ -124,7 +126,8 @@ test("Ignored rows keep file opening, directory expansion and transfers, with di
   assert.equal(file.nodes[1].styles.text_color, tints.dim);
   assert.equal(file.nodes[2].styles.text_color, tints.dim);
   file.handlers.on_click({}, cx);
-  assert.equal(state.shared["vsc.editor.space:workspace:1"].active, path.join(repo, "debug.log"));
+  await state.drain();
+  assert.equal(state.shared["vsc.file-panes"]["native-pane"].file.path, path.join(repo, "debug.log"));
   file.nodes[3].handlers.on_click({}, { stop_propagation() {} });
   assert.equal(state.overlays[0].props.source.path, path.join(repo, "debug.log"));
   const folder = view.row({ e: entry(view, "cache"), path: "cache", depth: 0 }, tints, null);

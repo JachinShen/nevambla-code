@@ -96,99 +96,44 @@
           "type": "column",
           "children": [
             {
-              "id": "editor",
-              "type": "row",
-              "children": [
-                {
-                  "id": "editor-1",
-                  "type": "block",
-                  "content": {
-                    "mod": "vsc-editor",
-                    "props": {
-                      "group": 1
-                    }
-                  },
-                  "size": {
-                    "weight": 1.0331045389175415
-                  }
-                },
-                {
-                  "id": "editor-2",
-                  "type": "block",
-                  "content": {
-                    "mod": "vsc-editor",
-                    "props": {
-                      "group": 2
-                    }
-                  },
-                  "size": {
-                    "weight": 0.9668954610824585
-                  },
-                  "hidden": true
-                }
-              ],
-              "size": {
-                "weight": 2
+              "id": "panelbar",
+              "type": "block",
+              "content": {
+                "mod": "vsc-panelbar"
               },
-              "divider": {
-                "width": 1,
-                "color": "border"
+              "size": {
+                "px": 36
               }
             },
             {
-              "id": "termpanel",
-              "type": "column",
-              "children": [
-                {
-                  "id": "panelbar",
-                  "type": "block",
-                  "content": {
-                    "mod": "vsc-panelbar"
+              "id": "main",
+              "type": "block",
+              "content": {
+                "tab": "active",
+                "pane": {
+                  "header": {
+                    "content": {
+                      "mod": "vsc-pane"
+                    },
+                    "reveal": "always",
+                    "height": 28,
+                    "position": "top"
                   },
-                  "size": {
-                    "px": 36
-                  }
-                },
-                {
-                  "id": "main",
-                  "type": "block",
-                  "content": {
-                    "tab": "active",
-                    "pane": {
-                      "header": {
-                        "content": {
-                          "mod": "pane"
-                        },
-                        "reveal": "always",
-                        "height": 28,
-                        "position": "top"
-                      },
-                      "background": "background",
-                      "border": {
-                        "width": 1,
-                        "color": "border"
-                      },
-                      "focus": {
-                        "width": 1,
-                        "color": "border"
-                      },
-                      "radius": 0,
-                      "gap": 0
-                    }
-                  }
+                  "background": "background",
+                  "border": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "focus": {
+                    "width": 1,
+                    "color": "border"
+                  },
+                  "radius": 0,
+                  "gap": 0
                 }
-              ],
-              "size": {
-                "weight": 3
-              },
-              "min": 120,
-              "background": "chrome"
+              }
             }
-          ],
-          "divider": {
-            "width": 1,
-            "color": "border"
-          }
+          ]
         }
       ]
     }

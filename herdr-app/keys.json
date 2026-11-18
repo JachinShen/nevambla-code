@@ -1,8 +1,7 @@
 {
   "layout:nevambla-code": {
     "cmd-b": "layout.toggle:side",
-    "cmd-j": "layout.toggle:termpanel",
-    "cmd-alt-j": "vsc-panelbar.flip",
+    "cmd-j": "pane.zoom",
     "cmd-shift-v": "vsc-editor.preview",
     "cmd-alt-r": "vsc-editor.runfile",
     "cmd-shift-o": "mod.open:vsc-jump"

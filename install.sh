@@ -5,7 +5,7 @@
 #      the nevambla-code layout, its vsc-* mods, the dracula theme and its shortcuts
 #   3. fonts/                 -> your user font folder               (JetBrainsMono Nerd Font)
 # Anything it would replace is backed up first to ~/.config/nevambla-code-backups/<time>/.
-# Shortcuts are merged: keys you already use are never replaced.
+# Shortcuts are merged: personal bindings are kept, older layout presets migrate.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
@@ -56,6 +56,12 @@ import json, os, sys
 src, dest = sys.argv[1], sys.argv[2]
 new = json.load(open(src))
 cur = json.load(open(dest)) if os.path.exists(dest) else {}
+# Retire this layout's earlier panel shortcuts while preserving personal bindings.
+section = cur.get("layout:nevambla-code", {})
+if section.get("cmd-j") == "layout.toggle:termpanel":
+    section["cmd-j"] = "pane.zoom"
+if section.get("cmd-alt-j") == "vsc-panelbar.flip":
+    del section["cmd-alt-j"]
 for section, keys in new.items():
     have = cur.setdefault(section, {})
     for key, action in keys.items():

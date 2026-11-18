@@ -28,7 +28,7 @@ async function harness(cwd = "/home", machine = null) {
     set_value(value) { this.text = value; }
   }
   const host = {
-    spaces: () => [{ id: "workspace", active: true, folder: state.cwd, machine: state.machine }],
+    spaces: () => [{ id: "workspace", active: true, folder: state.cwd, machine: state.machine, tabs: [{id:"native-tab"}] }],
     panes: () => [{ pane: "pane", cwd: state.cwd }], focused: () => state.focus,
     shared: name => name === "vsc.explorer.jump" ? state.jump : state.shared[name],
     setShared: (name, value) => { state.shared[name] = value; },
@@ -38,7 +38,7 @@ async function harness(cwd = "/home", machine = null) {
     exec: async (...args) => { state.calls.push(args); return state.exec(...args); },
     readTextFile: filename => readFile(filename, "utf8"),
     watchFolder: async () => { throw new Error("Filesystem watching is outside these regression tests"); },
-    theme: () => ({}), settings: () => ({}),
+    theme: () => ({}), settings: () => ({}), appHome: () => "/app", notify() {},
   };
   const ui = { View: class {}, div() {}, svg() {}, v_flex() {}, h_flex() {}, InputState, Input: {}, Scrollbar: {}, v_virtual_list() {} };
   const context = vm.createContext({ console });
@@ -164,41 +164,23 @@ test("Changing Explorer during a pending read discards the old result and blocks
 });
 
 
-test("Clicking a change opens a separate main editor diff and preserves editable tabs", async () => {
+test("Clicking a change opens a native diff tab with its captured machine", async () => {
   const { state, view, cx } = await harness("/repo", "ssh-a");
-  state.exec = async (_cmd, args) => ({ code: 0, stderr: "", stdout: args.includes("--show-toplevel") ? "/repo\n" : args.includes("status") ? " M file.txt\0" : "" });
+  state.exec = async (cmd, args) => {
+    if (cmd === "env") return {code:0,stderr:"",stdout:JSON.stringify({space:"workspace",tab:"native-tab",pane:"native-pane"})};
+    return { code: 0, stderr: "", stdout: args.includes("--show-toplevel") ? "/repo\n" : args.includes("status") ? " M file.txt\0" : "" };
+  };
   await state.refresh();
-  state.shared["vsc.editor.space:workspace:1"] = { files: [{ path: "/repo/file.txt", on: "ssh-a" }], active: "/repo/file.txt" };
   view.pick("file.txt", cx);
-  const editor = state.shared["vsc.editor.space:workspace:1"], file = editor.files[1];
-  assert.equal(editor.files[0].path, "/repo/file.txt");
+  while (state.pending.length) await Promise.all(state.pending.splice(0));
+  const file = state.shared["vsc.file-panes"]["native-pane"].file;
   assert.equal(file.kind, "diff");
   assert.equal(file.on, "ssh-a");
   assert.equal(file.sourcePath, "/repo/file.txt");
-  assert.equal(editor.active, file.path);
   assert.notEqual(file.path, "/repo/file.txt");
-  assert.deepEqual(plain(state.actions.at(-1)), ["layout.show", { id: "editor" }]);
-  view.pick("file.txt", cx);
-  assert.equal(state.shared["vsc.editor.space:workspace:1"].files.length, 2);
-  assert.notEqual(state.shared["vsc.editor.space:workspace:1"].files[1].revision, file.revision);
-  state.machine = "ssh-b";
-  await state.refresh();
-  view.pick("file.txt", cx);
-  assert.equal(state.shared["vsc.editor.space:workspace:1"].files.length, 3);
-  assert.notEqual(state.shared["vsc.editor.space:workspace:1"].active, file.path);
-});
-
-test("Diff opens in a visible second group, and rejects a stale directory click", async () => {
-  const { state, view, cx } = await harness("/repo");
-  state.exec = async (_cmd, args) => ({ code: 0, stderr: "", stdout: args.includes("--show-toplevel") ? "/repo\n" : args.includes("status") ? " D gone.txt\0" : "" });
-  await state.refresh();
-  state.layout.hidden = false;
-  state.shared["vsc.group.space:workspace"] = 2;
-  view.pick("gone.txt", cx);
-  assert.equal(state.shared["vsc.editor.space:workspace:2"].files[0].relativePath, "gone.txt");
-  assert.equal(state.shared["vsc.editor.space:workspace:1"], undefined);
-  const before = state.shared["vsc.editor.space:workspace:2"];
+  assert.deepEqual(plain(state.actions.at(-1)), ["pane.focus", {pane:"native-pane"}]);
+  const before = state.calls.length;
   state.pin("/other");
-  view.pick("gone.txt", cx);
-  assert.equal(state.shared["vsc.editor.space:workspace:2"], before);
+  view.pick("file.txt", cx);
+  assert.equal(state.calls.length, before);
 });

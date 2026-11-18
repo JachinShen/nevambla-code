@@ -20,19 +20,19 @@ let seq = 0;
 const FIND_PYTHON = 'd="$1"; while [ "$d" != "/" ] && [ -n "$d" ]; do [ -x "$d/.venv/bin/python" ] && { echo "$d/.venv/bin/python"; exit 0; }; d=$(dirname "$d"); done; command -v python3';
 
 export class Notebook {
-  constructor(file, { group, syntax, font, onDirty }) {
+  constructor(file, { instance, syntax, font, onDirty }) {
     this.file = file; this.syntax = syntax; this.font = font; this.onDirty = onDirty;
     this.cells = []; this.dirty = false; this.kernel = { state: "off" }; this.pending = new Map();
-    // One kernel per notebook per side: the same notebook open on both sides gets two.
-    this.dir = `${appHome()}/data/vsc-editor/nb/${hash(file.path + (group > 1 ? `#${group}` : ""))}`;
+    // One kernel per native pane, including copies of the same notebook in a split.
+    this.dir = `${appHome()}/data/vsc-editor/nb/${hash(JSON.stringify([file.on ?? null, file.path, instance]))}`;
   }
 
   // ---------- loading and saving ----------
-  async load() {
+  async load(saved = null) {
     const r = await exec("cat", [this.file.path], { on: this.file.on });  // no 1 MiB limit, unlike readTextFile
     if (r.code !== 0) throw new Error(r.stderr || "Can't read this notebook");
-    this.original = r.stdout;
-    this.nb = JSON.parse(r.stdout);
+    this.original = saved?.original ?? r.stdout;
+    this.nb = JSON.parse(saved?.text ?? r.stdout);
     await exec("mkdir", ["-p", `${this.dir}/inbox`, `${this.dir}/out`, `${this.dir}/img`]);
     // Notebooks not opened for a week: drop their cached images and kernel files.
     exec("sh", ["-c", 'find "$1" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null; touch "$2"',
@@ -63,7 +63,7 @@ export class Notebook {
     });
   }
 
-  touch(cx) { if (!this.dirty) { this.dirty = true; this.onDirty?.(); } cx?.notify(); }
+  touch(cx) { this.dirty = true; this.onDirty?.(); cx?.notify(); }
 
   toJSON() {
     const strip = o => { const { _img, ...rest } = o; return rest; };

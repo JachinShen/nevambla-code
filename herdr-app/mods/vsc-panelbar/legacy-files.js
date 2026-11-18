@@ -1,6 +1,6 @@
-// Identical in editor, explorer, changes and jump: Herdr isolates mod imports.
+// Validated reader for migrating earlier file lists into native Herdr tabs.
 // Existing global tabs are adopted once by the first active Space, without deleting them.
-import { spaces, shared, setShared, layout } from "herdr";
+import { spaces, shared, setShared } from "herdr";
 
 export const currentSpace = () => spaces().find(space => space.active)?.id ?? null;
 const slot = (space, group) => `vsc.editor.space:${encodeURIComponent(space)}:${group}`;
@@ -27,31 +27,9 @@ function adopt(space) {
   if (shared(groupSlot(space)) == null) setShared(groupSlot(space), shared("vsc.group") === 2 ? 2 : 1);
   setShared("vsc.editor.migrated", space);
 }
-function find(node, id) {
-  if (node?.id === id) return node;
-  for (const child of node?.children ?? []) { const result = find(child, id); if (result) return result; }
-  return null;
-}
-export function activeGroup(space = currentSpace()) {
-  adopt(space);
-  return space && shared(groupSlot(space)) === 2 ? 2 : 1;
-}
-export function setActiveGroup(group, space = currentSpace()) {
-  if (!space) throw new Error("No active Space for editor tabs");
-  adopt(space);
-  setShared(groupSlot(space), group === 2 ? 2 : 1);
-}
-export const targetGroup = () => activeGroup() === 2 && find(layout(), "editor-2")?.hidden === false ? 2 : 1;
-export const editorKey = (group = targetGroup(), space = currentSpace()) => space ? slot(space, group) : null;
-export function readEditor(group = targetGroup(), space = currentSpace()) {
+export function readEditor(group, space = currentSpace()) {
   if (!space) return empty();
   adopt(space);
   const state = shared(slot(space, group));
   return state == null ? empty() : validate(state);
-}
-export function writeEditor(state, group = targetGroup(), space = currentSpace()) {
-  if (!space) throw new Error("No active Space for editor tabs");
-  validate(state);
-  adopt(space);
-  setShared(slot(space, group), state);
 }
