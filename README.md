@@ -125,6 +125,8 @@ There's plenty left to improve: optimizations, new panels and features I haven't
 
 ## License
 
+The Explorer navigation arrows use official [Lucide 0.511.0 SVG assets](https://github.com/lucide-icons/lucide/tree/0.511.0/icons), under the accompanying [ISC license](herdr-app/mods/vsc-explorer/lucide-LICENSE).
+
 The bundled Prism 1.30.0 tokenizer and Nix, Verilog and VHDL grammars use the [MIT license](herdr-app/mods/vsc-editor/vendor/prism-LICENSE). Circuit-netlist rules and the native preview renderer live in the editor mod.
 
 [MIT](LICENSE). The derived `vsc-changes` mod retains its [Apache-2.0 license](herdr-app/mods/vsc-changes/LICENSE) and [attribution](herdr-app/mods/vsc-changes/NOTICE). The font is JetBrains Mono patched by [Nerd Fonts](https://www.nerdfonts.com) (v3.4.0), under the SIL Open Font License 1.1 (`fonts/OFL.txt`).
