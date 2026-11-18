@@ -17,7 +17,7 @@ JachinShen’s fork of [nevambla/nevambla-code](https://github.com/nevambla/neva
 
 ## The layout
 
-- **Title bar:** your Claude plan usage (session and week), a centered command center that opens the palette, side bar and editor toggles, and a clock.
+- **Title bar:** a centered command center that opens the palette, side bar and editor toggles, and a clock.
 - **Path navigation and transfers:** ⌘⇧O opens a local or remote terminal path in Explorer. The file tree’s transfer action copies a file between this computer and a registered SSH machine, or between two SSH machines. Completed transfers offer the full destination path for copying.
 - **Activity bar:** switches the side bar between Explorer, Changes and Spaces.
 - **Side bar:** the file tree of the focused pane’s folder, with your spaces and agents underneath. Git-ignored files and folders stay browsable with dimmed names and icons, locally and over SSH. Source Control follows the folder selected in Explorer; selecting a change opens a read-only diff tab in the main editor, including staged and unstaged changes against HEAD.
@@ -50,7 +50,7 @@ Open the herdr desktop app once before running it, so `~/.config/herdr-app` exis
 
 As herdr asks for shared layouts:
 
-- **Network:** the title bar's usage meter (`vsc-titlebar/usage.sh`) reads your Claude Code login from the macOS Keychain and asks `api.anthropic.com` for your plan usage, the same data as Claude Code's `/usage`. The token stays inside that script. It is macOS only; elsewhere it shows no data.
+- **Network:** when enabled with title bar `props.show_usage: true`, the usage meter (`vsc-titlebar/usage.sh`) reads your Claude Code login from the macOS Keychain and asks `api.anthropic.com` for your plan usage, the same data as Claude Code's `/usage`. The token stays inside that script. It is macOS only; elsewhere it shows no data.
 - **Programs:** path navigation and Git previews run `python3` and `git` on the selected machine through Herdr. Transfers use `hc machine ls` to resolve registered SSH targets and the local `/usr/bin/ssh` command, including the user’s SSH configuration. SSH command streams preserve the same filesystem namespace as the remote shell. Each copy checks size and SHA-256 before publication; an existing destination gets a numbered sibling. Errors remain visible. The editor runs `python3` (notebooks, through `vsc-editor/kernel.py`), `pdftoppm` / `pdfinfo` (PDFs) and `open` (Open in Preview).
 - **Files:** the Explorer and editor read and save files in the folders your panes are in. Temporary file-transfer payloads are staged locally or in the destination directory, then removed. Transfer destination preferences stay in local shared state. PDF pages and notebook state are cached in `~/.config/herdr-app/data/vsc-editor/`.
 
@@ -74,14 +74,15 @@ python3 -B herdr-app/mods/vsc-explorer/tests/test_download.py --machine ssh-a
 
 Check each changed mod with `herdr-app check /absolute/path/to/mod`, then inspect it in the running app. Notebook dependencies are needed only when running notebook cells.
 
-## Claude accounts in the title bar
+## Optional Claude usage meter
 
-By default the meter shows your default `claude` login. To show several accounts, add `props` to the title bar block in `~/.config/herdr-app/layouts/nevambla-code.json`:
+Enable the meter with `props.show_usage: true`. To choose accounts, add `props` to the title bar block in `~/.config/herdr-app/layouts/nevambla-code.json`:
 
 ```json
 "content": {
   "mod": "vsc-titlebar",
   "props": {
+    "show_usage": true,
     "accounts": [
       { "name": "Personal" },
       { "name": "Work", "config_dir": "~/.claude-work", "command": "claude-work" }

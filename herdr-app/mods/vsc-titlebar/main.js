@@ -11,7 +11,8 @@ import { theme, run, spaces, layout, window, exec, appHome, shared, setShared, p
 // config_dir: the CLAUDE_CONFIG_DIR that account's Claude Code uses (omit for the default login).
 // command: what you type to start it, shown as a hint (default: "claude", or the config dir's name).
 // id: key for its cached usage (default: from the name).
-// Without accounts, the default `claude` login is shown. The first account is the default one.
+// Usage is opt-in via props.show_usage: true. The first account is the default one.
+const showUsage = () => props()?.show_usage === true;
 function accounts() {
   const list = Array.isArray(props()?.accounts) && props().accounts.length ? props().accounts : [{ name: "Claude" }];
   return list.map(a => {
@@ -46,8 +47,10 @@ function until(iso) {
 export default class VscTitlebar extends View {
   init(_p, cx) {
     if (checking()) return;
-    this.fetch(cx);
-    cx.timer.every(300000, cx => this.fetch(cx));  // every 5 minutes
+    if (showUsage()) {
+      this.fetch(cx);
+      cx.timer.every(300000, cx => this.fetch(cx));  // every 5 minutes
+    }
     // The clock and the countdowns change once a minute: redraw on the minute, not more often
     // (every redraw of a mod redraws the whole window).
     cx.timer.after(60000 - (Date.now() % 60000) + 50, cx => { cx.notify(); cx.timer.every(60000, cx => cx.notify()); });
@@ -136,7 +139,7 @@ export default class VscTitlebar extends View {
       // Equal-width sides (flex_1 from zero) keep the search box exactly centered.
       .child(h_flex().flex_1().min_w(0).h_full().items_center().overflow_hidden()
         .child(div().w(lights ? 80 : 14).flex_none())
-        .child(this.usageView(t, lights ? 80 : 14, find(L, "titlebar")?.size?.px ?? 35)))
+        .when(showUsage(), el => el.child(this.usageView(t, lights ? 80 : 14, find(L, "titlebar")?.size?.px ?? 35))))
       .child(h_flex().id("command-center").w(380).flex_shrink_0().h(24).flex_none().px(10).gap(6).items_center().justify_center()
         .rounded(6).border_1().border_color(t.border).bg(t.input).cursor_pointer()
         .hover(s => s.border_color(t.dim).text_color(t.foreground))
