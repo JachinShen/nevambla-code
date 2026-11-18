@@ -57,7 +57,7 @@ async function harness(list = []) {
   async function load(relative) {
     const module = new vm.SourceTextModule(await readFile(new URL(relative, import.meta.url), "utf8"), { context });
     await module.link(name => {
-      const exports = name === "herdr" ? host : name === "./resources.js" ? {Resources: class {}, INTERVAL: 30000, STALE: 90000, gib:()=>{}, resourceColor:()=>{}} : ui;
+      const exports = name === "herdr" ? host : name === "./resources.js" ? {Resources: class {}, INTERVAL: 5000, STALE: 90000, gib:()=>{}, resourceColor:()=>{}} : ui;
       return new vm.SyntheticModule(Object.keys(exports), function () {
         for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
       }, { context });

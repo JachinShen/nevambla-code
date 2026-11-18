@@ -56,7 +56,7 @@ export default class VscActivity extends View {
       return;
     }
     const state = this.resources.states.get(on);
-    // A second startup sample establishes a CPU interval; subsequent probes are thirty seconds apart.
+    // A second startup sample establishes a CPU interval before regular polling.
     const interval = state?.value?.cpu === null ? 3000 : INTERVAL;
     if (this.resources.pending.has(on) || Date.now() - (this.resourceAt.get(on) ?? 0) < interval) return;
     this.resourceAt.set(on, Date.now());
@@ -68,7 +68,7 @@ export default class VscActivity extends View {
     const value = !state?.error && !stale ? state?.value : null;
     const host = on ?? "This computer";
     const title = state?.error ? `${host} · Resources unavailable\n${state.error}\nClick to retry`
-      : `${host} · Host resources · refreshes every 30 seconds\nYellow ≥ 60% · Red ≥ 90%`
+      : `${host} · Host resources · refreshes every ${INTERVAL / 1000} seconds\nYellow ≥ 60% · Red ≥ 90%`
         + (value ? `\nMemory: ${gib(value.used)} / ${gib(value.total)} GB (1024³ bytes)` : "")
         + (stale ? "\nReading expired · Refreshing…" : !value || value.cpu === null ? "\nCollecting CPU baseline…" : "");
     const ring = (id, label, fraction, text) => {

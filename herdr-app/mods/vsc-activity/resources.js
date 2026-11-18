@@ -1,6 +1,6 @@
 import { exec, readTextFile, appHome } from "herdr";
 
-export const INTERVAL = 30000;
+export const INTERVAL = 5000;
 export const STALE = 90000;
 
 export function validate(value) {

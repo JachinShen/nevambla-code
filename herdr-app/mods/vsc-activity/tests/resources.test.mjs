@@ -105,7 +105,7 @@ test("Overlapping requests never launch a second process for the same machine",a
   assert.equal(state.calls.length,1);
 });
 test("Rings show CPU percent and used GB, with independent 60/90 percent warnings",async()=>{
-  const {view,INTERVAL,STALE}=await harness();assert.equal(INTERVAL,30000);
+  const {view,INTERVAL,STALE}=await harness();assert.equal(INTERVAL,5000);
   view.resources.states.set("chip",{value:{cpu:25,used:8*1073741824,total:16*1073741824},at:Date.now()});
   const all=n=>n&&typeof n==="object"?[n,...n.nodes.flatMap(all)]:[];
   const find=(tree,id)=>all(tree).find(n=>n.styles.id===id);
