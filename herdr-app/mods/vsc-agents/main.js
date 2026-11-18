@@ -4,7 +4,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
-import { toggleSection } from "./sections.js";
+const STATUS_COLOR = { blocked: "#ef5b5b", working: "#39c67a", done: "#4c9dff" };
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -79,6 +79,10 @@ export default class Agents extends View {
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
     cx.timer.every(30000, (cx) => cx.notify());
+  }
+
+  select(a) {
+    run("agent.focus", { terminal: a.address });
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
@@ -204,15 +208,10 @@ export default class Agents extends View {
       .child(this.status(t, { status: st }, compact));
   }
 
-  // compact: a ! for blocked where a header already says "Needs you".
+  // Viewed idle agents leave the status slot empty.
   status(t, a, compact = false) {
-    const color = t[a.status] ?? t.dim;
-    if (a.status === "working") return svg("mods/workspace-chrome/spinner.svg").size(12).mx(1).flex_none().text_color(t.working).spin(1800);
-    if (a.status === "blocked" && compact) return div().size(14).flex_none().rounded(4).bg(t.blocked + "26").text_size(10.5).font_bold().text_color(t.blocked).flex().items_center().justify_center().child("!");
-    if (a.status === "blocked") return div().flex_none().px(6).h(18).rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).flex().items_center().child("Needs you");
-    // Idle: a ring; done: a dot.
-    if (a.status === "idle") return div().size(7).mx(3).flex_none().rounded(4).border(1.5).border_color(t.idle ?? t.dim);
-    return div().size(7).mx(3).flex_none().rounded(4).bg(a.status === "done" ? color : t.dim + "00");
+    return div().size(8).mx(3).flex_none().rounded(4)
+      .when(Boolean(STATUS_COLOR[a.status]), el => el.bg(STATUS_COLOR[a.status]));
   }
 
   render(cx) {
@@ -258,7 +257,7 @@ export default class Agents extends View {
         .items_center()
         .rounded(4)
         .text_size(11)
-        .text_color(open ? t.dim : (t[top] ?? t.dim))
+        .text_color(open ? t.dim : (STATUS_COLOR[top] ?? t.dim))
         .cursor_pointer()
         .hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_click((_e, cx) => {
@@ -299,7 +298,7 @@ export default class Agents extends View {
           .items_center()
           .gap(4)
           .hover((s) => s.bg(t.hover))
-          .on_click(() => run("pane.focus", { pane: a.pane }))
+          .on_click(() => this.select(a))
           .child(div().flex_1().min_w(0).whitespace_nowrap().text_right().text_color(t.muted).child(String(i + 1)))
           .child(h_flex().w(14).flex_none().items_center().justify_center().child(this.status(t, a, true)));
       }
@@ -343,7 +342,7 @@ export default class Agents extends View {
           else if (this.hovered === a.address) this.hovered = null;
           cx.notify();
         })
-        .on_click(() => run("pane.focus", { pane: a.pane }))
+        .on_click(() => this.select(a))
         .when(Boolean(pic), el => el.child(div().id(`agent-fold-${a.address}`)
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
@@ -390,7 +389,7 @@ export default class Agents extends View {
           open ? this.folded.add(g.id) : this.folded.delete(g.id);
           cx.notify();
         })
-        .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
+        .child(div().truncate().text_color(STATUS_COLOR[g.status] ?? t.dim).child(g.label))
         .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
         .child(div().flex_1())
         .when(!open, (el) => el
@@ -405,22 +404,21 @@ export default class Agents extends View {
       .size_full()
       .min_h(0)
       .bg(t.chrome)
-      .border_t(1)
-      .border_color(t.border)
+      .border_t(1).border_color(t.border)
       .text_size(13)
       .when(!collapsed, (el) =>
         el.child(
           h_flex()
             .px(16)
-            .h(41)
-            .pt(14)
-            .pb(5)
+            .h(35)
             .flex_none()
             .items_center()
             .justify_between()
             .child(h_flex().id("ag-toggle").gap(6).items_center().cursor_pointer().text_size(11.5).font_medium().text_color(t.dim)
               .hover((s) => s.text_color(t.foreground))
-              .on_click(() => toggleSection())
+              .tooltip("Collapse agents")
+              .on_click(() => run("layout.hide", { id: "agents-list" }))
+              .child(svg("mods/workspace-chrome/chevron-left.svg").size(13))
               .child(div().child("Agents")))
             .child(
               div()

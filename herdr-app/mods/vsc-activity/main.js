@@ -2,7 +2,8 @@
 // shown one again hides the side bar.
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, run, layout, agents, shared, setAgentOrder } from "herdr";
+import { theme, run, layout, agents, spaces, machines, shared, setAgentOrder, nextCommand } from "herdr";
+import { Resources, INTERVAL, STALE } from "./resources.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -17,23 +18,14 @@ const VIEWS = [
 ];
 
 const STATUS = {
-  working: { label: "Working", color: "working" },
-  blocked: { label: "Needs you", color: "blocked" },
-  done: { label: "Done", color: "done" },
-  idle: { label: "Idle", color: "idle" },
-  unknown: { label: "Unknown", color: "unknown" },
+  working: { label: "Working", color: "#39c67a" },
+  blocked: { label: "Needs you", color: "#ef5b5b" },
+  done: { label: "Done", color: "#4c9dff" },
+  idle: { label: "Seen" },
+  unknown: { label: "Unknown" },
 };
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1, unknown: 0 };
 const ROW_HEIGHT = 36, ROW_GAP = 2, RAIL_PADDING = 4;
-
-function toggleAgents() {
-  const L = layout(), side = find(L, "side"), panel = find(L, "agents-list");
-  if (!side || !panel) throw new Error("The layout is missing its Agents panel");
-  if (side.hidden || panel.hidden) {
-    run("layout.show", { id: "agents-list" });
-    if (side.hidden) run("layout.show", { id: "side" });
-  } else run("layout.hide", { id: "agents-list" });
-}
 
 function pick(view) {
   const L = layout(), side = find(L, "side"), body = find(L, "side-body");
@@ -43,6 +35,51 @@ function pick(view) {
 }
 
 export default class VscActivity extends View {
+  init(_props, cx) {
+    this.resources = new Resources();
+    this.resourceAt = new Map();
+    cx.timer.every(1000, cx => this.refreshResources(cx));
+    cx.spawn(async cx => {
+      for (;;) {
+        if (await nextCommand() === "agents") { this.toggleAgents(); cx.notify(); }
+      }
+    });
+  }
+
+  refreshResources(cx) {
+    const on = spaces().find(s => s.active)?.machine;
+    if (!on) return;
+    const machine = machines().find(m => m.name === on && !m.temporary);
+    if (machine?.layout !== "ready") {
+      if (this.resources.states.get(on)?.error !== "Machine is offline") { this.resources.offline(on); cx.notify(); }
+      return;
+    }
+    const state = this.resources.states.get(on);
+    // A second startup sample establishes a CPU interval; subsequent probes are thirty seconds apart.
+    const interval = state?.value?.cpu === null ? 3000 : INTERVAL;
+    if (this.resources.pending.has(on) || Date.now() - (this.resourceAt.get(on) ?? 0) < interval) return;
+    this.resourceAt.set(on, Date.now());
+    cx.spawn(async cx => { await this.resources.sample(on); cx.notify(); });
+  }
+
+  meters(on, t) {
+    const state = this.resources.states.get(on), stale = state && Date.now() - state.at > STALE;
+    const value = !state?.error && !stale ? state?.value : null;
+    const title = state?.error ? `${on} · Resources unavailable\n${state.error}\nClick to retry`
+      : `${on} · Linux host resources\nCPU and memory usage · refreshes every 30 seconds${!value || value.cpu === null ? "\nCollecting CPU baseline…" : ""}`;
+    const bar = (id, label, fraction) => v_flex().w_full().gap(3)
+      .child(div().text_size(9).text_color(t.muted).child(label))
+      .child(div().w_full().h(4).rounded(2).bg(t.border)
+        .when(fraction != null, el => el.child(div().id(id).w(Math.max(0, Math.min(1, fraction)) * 28).h(4).rounded(2)
+          .bg(fraction >= 0.9 ? "#ef5b5b" : "#8daec8"))));
+    return v_flex().id("host-resources").w_full().h(66).flex_none().px(10).py(6).gap(8).tooltip(title)
+      .when(Boolean(state?.error), el => el.cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => {
+        this.resourceAt.delete(on); this.refreshResources(cx);
+      }))
+      .child(bar("host-cpu", "CPU", value?.cpu == null ? null : value.cpu / 100))
+      .child(bar("host-memory", "MEM", value ? value.used / value.total : null));
+  }
+
   item(v, active, badge, action = () => pick(v.id)) {
     const t = theme();
     return div().id(`act-${v.id}`).relative().w_full().h(48).flex_none().flex().items_center().justify_center().cursor_pointer().tooltip(v.title)
@@ -66,31 +103,42 @@ export default class VscActivity extends View {
       .on_click(() => run("agent.focus", { terminal: a.address }))
       .child(div().size(28).flex_none().relative().flex().items_center().justify_center()
         .child(pic.flex_none())
-        .child(div().id(`agent-light-${a.address}`).absolute().top(0).right(0).size(8).rounded(4)
-          .border(1.5).border_color(t.chrome).bg(t[status.color])
-          .when(a.status === "working" || a.status === "blocked", el => el.loop("opacity", {
-            from: 0.35, to: 1, period: a.status === "blocked" ? 1400 : 2400, easing: "ease-in-out",
-          }))));
+        .when(Boolean(status.color), el => el.child(div().id(`agent-light-${a.address}`).absolute().top(0).right(0).size(9).rounded(5)
+          .border(1).border_color(t.chrome).bg(status.color))));
   }
 
-  render() {
+  toggleAgents() {
+    const L = layout(), side = find(L, "side"), panel = find(L, "agents-list");
+    if (!side || !panel) throw new Error("The layout is missing its Agents panel");
+    if (side.hidden || panel.hidden) {
+      run("layout.show", { id: "agents-list" });
+      if (side.hidden) run("layout.show", { id: "side" });
+    } else run("layout.hide", { id: "agents-list" });
+  }
+
+  render(cx) {
     const t = theme(), L = layout();
-    const sideHidden = Boolean(find(L, "side")?.hidden), panel = find(L, "agents-list");
+    const sideHidden = Boolean(find(L, "side")?.hidden);
+    const open = !sideHidden && find(L, "agents-list")?.hidden === false;
+    const on = spaces().find(s => s.active)?.machine;
+    if (this.resources) this.refreshResources(cx);
     const shown = sideHidden ? null : find(L, "side-body")?.active;
-    const open = Boolean(panel && !sideHidden && !panel.hidden);
     const list = [...agents()].sort((a, b) => Number(b.pinned) - Number(a.pinned)
       || (shared("agents.sort") === "grouped" ? 0 : (RANK[b.status] ?? 0) - (RANK[a.status] ?? 0) || b.seq - a.seq));
-    const waiting = list.filter(a => a.status === "blocked" || a.status === "done").length;
     if (!open) setAgentOrder(list.map(a => a.address));
     return v_flex().id("activity").size_full().min_h(0).bg(t.chrome).border_r(1).border_color(t.border)
       .children(VIEWS.map(v => this.item(v, shown === v.id, 0)))
+      .when(Boolean(on), el => el.child(this.meters(on, t)))
       .child(v_flex().flex_1().min_h(0).justify_end()
         // Scrollbar wrappers fill their box; bound that box so a short list stays at the bottom.
-        .when(!open && list.length > 0, el => el.child(div().w_full().min_h(0).max_h_full()
+        .when(list.length > 0, el => el.child(div().w_full().min_h(0).max_h_full()
           .h(list.length * (ROW_HEIGHT + ROW_GAP) - ROW_GAP + RAIL_PADDING * 2)
           .child(v_flex().id("agent-rail").size_full().min_h(0).overflow_y_scrollbar().px(RAIL_PADDING).py(RAIL_PADDING).gap(ROW_GAP)
             .children(list.map(a => this.compactAgent(a, t)))))))
-      .child(this.item({ id: "agents", icon: "bot", title: open ? "Hide Agents" : "Show Agents" }, open, waiting, toggleAgents))
+      .child(div().id("agent-expand").w_full().h(28).flex_none().flex().items_center().justify_center().cursor_pointer()
+        .tooltip(open ? "Collapse agents" : "Expand agents").text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+        .on_click(() => this.toggleAgents())
+        .child(svg(`mods/workspace-chrome/chevron-${open ? "left" : "right"}.svg`).size(14)))
       .child(div().id("act-settings").w_full().h(48).flex_none().flex().items_center().justify_center().cursor_pointer().tooltip("Settings")
         .text_color(t.dim).hover(s => s.text_color(t.foreground)).on_click(() => run("app.settings"))
         .child(svg("mods/vsc-activity/settings.svg").size(22)));

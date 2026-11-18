@@ -33,12 +33,16 @@ const agent = (address, status, options = {}) => ({
 
 async function harness(list = []) {
   const tree = JSON.parse(await readFile(new URL("../../../layouts/nevambla-code.json", import.meta.url), "utf8"));
-  const state = { list, tree, calls: [], shared: {}, order: null };
+  const state = { list, tree, calls: [], shared: {}, order: null, props: {}, overlays: [] };
   const context = vm.createContext({});
   const host = {
     theme: () => new Proxy({}, { get: (_target, key) => String(key) }),
     agents: () => state.list, layout: () => state.tree,
-    shared: key => state.shared[key], setAgentOrder: order => { state.order = plain(order); },
+    shared: key => state.shared[key], setShared: (key, value) => { state.shared[key] = value; }, setAgentOrder: order => { state.order = plain(order); },
+    props: () => state.props, terminals: () => [], panes: () => [], focused: () => ({}), spaces: () => [], window: () => ({}),
+    nextCommand: () => new Promise(() => {}), machines: () => [],
+    openOverlay: spec => { state.overlays.push(plain(spec)); return "launcher-" + state.overlays.length; },
+    closeOverlay: id => state.calls.push(["closeOverlay", id]),
     run: (name, args) => {
       state.calls.push([name, plain(args)]);
       if (name === "layout.show" || name === "layout.hide") {
@@ -53,7 +57,7 @@ async function harness(list = []) {
   async function load(relative) {
     const module = new vm.SourceTextModule(await readFile(new URL(relative, import.meta.url), "utf8"), { context });
     await module.link(name => {
-      const exports = name === "herdr" ? host : ui;
+      const exports = name === "herdr" ? host : name === "./resources.js" ? {Resources: class {}, INTERVAL: 30000, STALE: 90000} : ui;
       return new vm.SyntheticModule(Object.keys(exports), function () {
         for (const [key, value] of Object.entries(exports)) this.setExport(key, value);
       }, { context });
@@ -63,33 +67,24 @@ async function harness(list = []) {
   }
   const Main = (await load("../main.js")).default;
   const view = new Main();
-  return { state, draw: () => view.render(), sections: await load("../../vsc-agents/sections.js") };
+  return { state, draw: () => view.render(), launcher: new (await load("../../vsc-agents/main.js")).default() };
 }
 
-test("Agents opens below the current view and hides without losing panel size or selection", async () => {
+test("The rail arrow expands the bottom sidebar panel while preserving selection, size and compact icons", async () => {
   const { state, draw } = await harness([agent("t1", "working")]);
-  const body = find(state.tree, "side-body"), panel = find(state.tree, "agents-list");
-  body.active = "changes";
-  const size = plain(panel.size), tabState = plain(find(state.tree, "work"));
-  let tree = draw();
-  assert.ok(byId(tree, "agent-rail"));
-  assert.equal(tree.nodes.at(-2).styles.id, "act-agents");
-  assert.equal(tree.nodes.at(-1).styles.id, "act-settings");
-  byId(tree, "act-agents").handlers.on_click();
-  assert.equal(panel.hidden, false);
-  assert.equal(body.active, "changes");
-  tree = draw();
-  assert.equal(byId(tree, "agent-rail"), undefined);
-  byId(tree, "act-agents").handlers.on_click();
-  assert.equal(panel.hidden, true);
-  assert.deepEqual(plain(panel.size), size);
-  assert.deepEqual(plain(find(state.tree, "work")), tabState);
-  assert.deepEqual(state.calls, [
-    ["layout.show", { id: "agents-list" }], ["layout.hide", { id: "agents-list" }],
-  ]);
+  const body=find(state.tree,"side-body"), panel=find(state.tree,"agents-list");body.active="changes";
+  const size=plain(panel.size), work=plain(find(state.tree,"work"));
+  let tree=draw(); assert.ok(byId(tree,"agent-rail")); assert.equal(byId(tree,"act-agents"),undefined);
+  assert.equal(tree.nodes.at(-2).styles.id,"agent-expand");assert.equal(tree.nodes.at(-1).styles.id,"act-settings");
+  byId(tree,"agent-expand").handlers.on_click();assert.equal(panel.hidden,false);
+  assert.equal(body.active,"changes");assert.ok(byId(draw(),"agent-rail"));
+  byId(draw(),"agent-expand").handlers.on_click();assert.equal(panel.hidden,true);
+  assert.deepEqual(plain(panel.size),size);assert.deepEqual(plain(find(state.tree,"work")),work);
+  assert.deepEqual(state.calls,[["layout.show",{id:"agents-list"}],["layout.hide",{id:"agents-list"}]]);
+  assert.equal(state.overlays.length,0);
 });
 
-test("Compact status preserves identity across local and SSH agents and opens the captured target", async () => {
+test("Compact navigation preserves identity across local and SSH agents and opens the captured target", async () => {
   const { state, draw } = await harness([agent("t1", "working"), agent("ssh-chip/t1", "blocked")]);
   const tree = draw(), remote = byId(tree, "rail-agent-ssh-chip/t1");
   assert.ok(byId(tree, "rail-agent-t1"));
@@ -99,71 +94,53 @@ test("Compact status preserves identity across local and SSH agents and opens th
   assert.deepEqual(state.calls, [["agent.focus", { terminal: "ssh-chip/t1" }]]);
 });
 
-test("A corner status light breathes for working and blocked agents and stays steady otherwise", async () => {
+test("Steady red, green and blue dots disappear once done turns to viewed idle", async () => {
   const statuses = ["working", "blocked", "done", "idle", "unknown"];
   const { state, draw } = await harness(statuses.map((status, i) => agent("t" + i, status)));
   state.list[0].program = { name: "Prime Agent", icon: "icons/prime.png", tint: false };
   state.list[4].program = null;
   const tree = draw();
   for (let i = 0; i < statuses.length; i++) {
-    const row = byId(tree, "rail-agent-t" + i);
+    const row = byId(tree, "rail-agent-t" + i), light = byId(row, "agent-light-t" + i);
     assert.ok(row);
-    const light = byId(row, "agent-light-t" + i);
-    assert.ok(light);
-    assert.equal(light.styles.spin, undefined);
-    assert.equal(light.styles.loop, i < 2 ? "opacity" : undefined);
-    assert.equal(light.styles.bg, statuses[i]);
+    if (i < 3) {
+      assert.ok(light);
+      assert.equal(light.styles.spin, undefined); assert.equal(light.styles.loop, undefined);
+      assert.equal(light.styles.bg, ["#39c67a", "#ef5b5b", "#4c9dff"][i]);
+    } else assert.equal(light, undefined);
   }
   assert.equal(byId(tree, "rail-agent-t0").nodes[0].nodes[0].kind, "image");
-  assert.equal(byId(tree, "rail-agent-t1").nodes[0].nodes[0].kind, "svg");
-  assert.match(byId(tree, "rail-agent-t4").styles.tooltip, /Unknown/);
+  state.list[2].status = "idle";
+  assert.equal(byId(draw(), "agent-light-t2"), undefined);
 });
 
-test("Opening Agents restores a hidden sidebar without replacing its selected view", async () => {
-  const { state, draw } = await harness([agent("t1", "idle")]);
-  find(state.tree, "side").hidden = true;
-  find(state.tree, "agents-list").hidden = false;
-  find(state.tree, "side-body").active = "spaces";
-  assert.ok(byId(draw(), "agent-rail"));
-  byId(draw(), "act-agents").handlers.on_click();
-  assert.equal(find(state.tree, "side").hidden, false);
-  assert.equal(find(state.tree, "side-body").active, "spaces");
-  assert.deepEqual(state.calls, [
-    ["layout.show", { id: "agents-list" }], ["layout.show", { id: "side" }],
-  ]);
+test("The rail arrow restores a hidden sidebar without replacing its selected Spaces view", async () => {
+  const { state, draw }=await harness([agent("t1","idle")]);
+  find(state.tree,"side").hidden=true;find(state.tree,"side-body").active="spaces";
+  byId(draw(),"agent-expand").handlers.on_click();assert.equal(find(state.tree,"side").hidden,false);
+  assert.equal(find(state.tree,"side-body").active,"spaces");
+  assert.deepEqual(state.calls,[["layout.show",{id:"agents-list"}],["layout.show",{id:"side"}]]);
 });
 
-test("The Agents header uses visibility and is independent of retired Spaces collapse state", async () => {
-  const { state, sections } = await harness();
-  state.shared["vsc.sections"] = { spaces: true, agents: true, sizes: {} };
-  const panel = find(state.tree, "agents-list");
-  panel.hidden = false;
-  sections.toggleSection();
-  assert.equal(panel.hidden, true);
-  assert.equal(sections.isCollapsed(), true);
-  sections.toggleSection();
-  assert.equal(panel.hidden, false);
-  assert.ok(state.calls.every(([name, args]) => name !== "layout.resize" && args.id === "agents-list"));
+test("Selecting an agent in the expanded panel focuses its captured SSH address",async()=>{
+  const {state,launcher}=await harness();launcher.select(agent("ssh/t8","done"));
+  assert.deepEqual(state.calls,[["agent.focus",{terminal:"ssh/t8"}]]);
 });
 
-test("Spaces management has one panel, while compact navigation matches pinned and priority order", async () => {
+test("Spaces has one management view and pinned/priority navigation matches the rail", async () => {
   const { state, draw } = await harness([
     agent("idle", "idle"), agent("busy", "working"), agent("needs", "blocked"), agent("pin", "idle", { pinned: true }),
   ]);
   assert.equal(find(state.tree, "spaces").content.mod, "spaces");
-  assert.equal(find(state.tree, "spaces-switch"), undefined);
-  assert.equal(find(state.tree, "agents-dock"), undefined);
-  draw();
-  assert.deepEqual(state.order, ["pin", "needs", "busy", "idle"]);
+  assert.ok(find(state.tree, "agents-list"));
+  draw(); assert.deepEqual(state.order, ["pin", "needs", "busy", "idle"]);
   state.shared["agents.sort"] = "grouped";
-  draw();
-  assert.deepEqual(state.order, ["pin", "idle", "busy", "needs"]);
+  draw(); assert.deepEqual(state.order, ["pin", "idle", "busy", "needs"]);
 });
 
-test("An empty rail stays quiet and a missing panel reports an explicit error", async () => {
+test("An empty rail still offers expansion without a separate Agents button", async () => {
   const { state, draw } = await harness();
   assert.equal(byId(draw(), "agent-rail"), undefined);
-  const side = find(state.tree, "side");
-  side.children = side.children.filter(node => node.id !== "agents-list");
-  assert.throws(() => byId(draw(), "act-agents").handlers.on_click(), /missing its Agents panel/);
+  byId(draw(), "agent-expand").handlers.on_click();
+  assert.equal(find(state.tree,"agents-list").hidden,false);
 });
