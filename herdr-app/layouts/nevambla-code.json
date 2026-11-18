@@ -59,43 +59,20 @@
               ],
               "active": "explorer",
               "size": {
-                "weight": 1.9094082117080688
+                "weight": 3
               }
             },
             {
-              "id": "agents-dock",
-              "type": "column",
-              "children": [
-                {
-                  "id": "spaces-switch",
-                  "type": "block",
-                  "content": {
-                    "mod": "vsc-spaces"
-                  },
-                  "size": {
-                    "weight": 1
-                  }
-                },
-                {
-                  "id": "agents-list",
-                  "type": "block",
-                  "content": {
-                    "mod": "vsc-agents"
-                  },
-                  "size": {
-                    "weight": 2
-                  }
-                }
-              ],
+              "id": "agents-list",
+              "type": "block",
+              "content": {
+                "mod": "vsc-agents"
+              },
               "size": {
-                "weight": 1.0905917882919312
+                "weight": 1
               },
-              "min": 65,
-              "divider": {
-                "width": 1,
-                "color": "border"
-              },
-              "resizable": true
+              "min": 120,
+              "hidden": true
             }
           ],
           "size": {
