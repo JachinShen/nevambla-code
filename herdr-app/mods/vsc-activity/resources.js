@@ -26,7 +26,7 @@ export function usage(current, previous) {
 }
 
 export const gib = bytes => (bytes / 1073741824).toFixed(1);
-export const resourceColor = fraction => fraction >= 0.9 ? "#ef5b5b" : fraction >= 0.6 ? "#e3b341" : "#8daec8";
+export const resourceColor = (fraction, theme) => fraction >= 0.9 ? theme.blocked : fraction >= 0.6 ? theme.ansi3 : theme.done;
 
 export class Resources {
   constructor() { this.states = new Map(); this.pending = new Set(); }

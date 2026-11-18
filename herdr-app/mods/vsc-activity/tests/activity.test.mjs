@@ -48,7 +48,8 @@ async function harness(list = []) {
       if (name === "layout.show" || name === "layout.hide") {
         const node = find(state.tree, args.id);
         assert.ok(node, "Target layout node must exist");
-        node.hidden = name === "layout.hide";
+        if (name === "layout.hide") node.hidden = true;
+        else delete node.hidden;
       } else if (name === "layout.select") find(state.tree, args.stack).active = args.child;
     },
   };
@@ -76,9 +77,12 @@ test("The rail arrow expands the bottom sidebar panel while preserving selection
   const size=plain(panel.size), work=plain(find(state.tree,"work"));
   let tree=draw(); assert.ok(byId(tree,"agent-rail")); assert.equal(byId(tree,"act-agents"),undefined);
   assert.equal(tree.nodes.at(-2).styles.id,"agent-expand");assert.equal(tree.nodes.at(-1).styles.id,"act-settings");
-  byId(tree,"agent-expand").handlers.on_click();assert.equal(panel.hidden,false);
+  assert.match(byId(tree, "agent-expand").nodes[0].asset, /chevron-right\.svg$/);
+  byId(tree,"agent-expand").handlers.on_click();assert.equal(panel.hidden,undefined);
   assert.equal(body.active,"changes");assert.ok(byId(draw(),"agent-rail"));
+  assert.match(byId(draw(), "agent-expand").nodes[0].asset, /chevron-left\.svg$/);
   byId(draw(),"agent-expand").handlers.on_click();assert.equal(panel.hidden,true);
+  assert.match(byId(draw(), "agent-expand").nodes[0].asset, /chevron-right\.svg$/);
   assert.deepEqual(plain(panel.size),size);assert.deepEqual(plain(find(state.tree,"work")),work);
   assert.deepEqual(state.calls,[["layout.show",{id:"agents-list"}],["layout.hide",{id:"agents-list"}]]);
   assert.equal(state.overlays.length,0);
@@ -96,7 +100,7 @@ test("Compact navigation preserves identity across local and SSH agents and open
 
 test("Steady red, green and blue dots disappear once done turns to viewed idle", async () => {
   const statuses = ["working", "blocked", "done", "idle", "unknown"];
-  const { state, draw } = await harness(statuses.map((status, i) => agent("t" + i, status)));
+  const { state, draw, launcher } = await harness(statuses.map((status, i) => agent("t" + i, status)));
   state.list[0].program = { name: "Prime Agent", icon: "icons/prime.png", tint: false };
   state.list[4].program = null;
   const tree = draw();
@@ -106,7 +110,8 @@ test("Steady red, green and blue dots disappear once done turns to viewed idle",
     if (i < 3) {
       assert.ok(light);
       assert.equal(light.styles.spin, undefined); assert.equal(light.styles.loop, undefined);
-      assert.equal(light.styles.bg, ["#39c67a", "#ef5b5b", "#4c9dff"][i]);
+      assert.equal(light.styles.bg, statuses[i]);
+      assert.equal(launcher.status({ [statuses[i]]: light.styles.bg }, state.list[i]).styles.bg, light.styles.bg);
     } else assert.equal(light, undefined);
   }
   assert.equal(byId(tree, "rail-agent-t0").nodes[0].nodes[0].kind, "image");
@@ -117,7 +122,7 @@ test("Steady red, green and blue dots disappear once done turns to viewed idle",
 test("The rail arrow restores a hidden sidebar without replacing its selected Spaces view", async () => {
   const { state, draw }=await harness([agent("t1","idle")]);
   find(state.tree,"side").hidden=true;find(state.tree,"side-body").active="spaces";
-  byId(draw(),"agent-expand").handlers.on_click();assert.equal(find(state.tree,"side").hidden,false);
+  byId(draw(),"agent-expand").handlers.on_click();assert.equal(find(state.tree,"side").hidden,undefined);
   assert.equal(find(state.tree,"side-body").active,"spaces");
   assert.deepEqual(state.calls,[["layout.show",{id:"agents-list"}],["layout.show",{id:"side"}]]);
 });
@@ -131,7 +136,7 @@ test("Spaces has one management view and pinned/priority navigation matches the 
   const { state, draw } = await harness([
     agent("idle", "idle"), agent("busy", "working"), agent("needs", "blocked"), agent("pin", "idle", { pinned: true }),
   ]);
-  assert.equal(find(state.tree, "spaces").content.mod, "spaces");
+  assert.equal(find(state.tree, "spaces").content.mod, "vsc-spaces");
   assert.ok(find(state.tree, "agents-list"));
   draw(); assert.deepEqual(state.order, ["pin", "needs", "busy", "idle"]);
   state.shared["agents.sort"] = "grouped";
@@ -142,5 +147,5 @@ test("An empty rail still offers expansion without a separate Agents button", as
   const { state, draw } = await harness();
   assert.equal(byId(draw(), "agent-rail"), undefined);
   byId(draw(), "agent-expand").handlers.on_click();
-  assert.equal(find(state.tree,"agents-list").hidden,false);
+  assert.equal(find(state.tree,"agents-list").hidden,undefined);
 });

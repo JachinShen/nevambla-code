@@ -6,6 +6,8 @@ import vm from "node:vm";
 const snapshot = (total = 1000, idle = 700) => ({ version: 1, boot: "boot-one", total_ticks: total,
   idle_ticks: idle, cpus: 8, memory_total: 16 * 1073741824, memory_available: 10 * 1073741824 });
 const plain = v => JSON.parse(JSON.stringify(v));
+const victoria = JSON.parse(await readFile(new URL("../../../themes/victoria.json", import.meta.url), "utf8"));
+const palette = { ...victoria.colors, ansi3: victoria.ansi[3] };
 function element() {
   const target = { nodes: [], styles: {}, handlers: {} };
   const proxy = new Proxy(target, { get(o, k) {
@@ -110,13 +112,13 @@ test("Rings show CPU percent and used GB, with independent 60/90 percent warning
   const all=n=>n&&typeof n==="object"?[n,...n.nodes.flatMap(all)]:[];
   const find=(tree,id)=>all(tree).find(n=>n.styles.id===id);
   const text=tree=>all(tree).flatMap(n=>n.nodes.filter(v=>typeof v==="string")).join(" ");
-  let tree=view.meters("chip",{});
+  let tree=view.meters("chip",palette);
   assert.equal(text(tree),"25% 8.0 G");
   assert.equal(find(tree,"host-cpu").styles.size,40);
-  assert.equal(find(find(tree,"host-cpu"),"arc").styles.bg,"#8daec8");
-  view.resources.states.set("chip",{value:{cpu:60,used:9,total:10},at:Date.now()});tree=view.meters("chip",{});
-  assert.equal(find(find(tree,"host-cpu"),"arc").styles.bg,"#e3b341");
-  assert.equal(find(find(tree,"host-memory"),"arc").styles.bg,"#ef5b5b");
+  assert.equal(find(find(tree,"host-cpu"),"arc").styles.bg,palette.done);
+  view.resources.states.set("chip",{value:{cpu:60,used:9,total:10},at:Date.now()});tree=view.meters("chip",palette);
+  assert.equal(find(find(tree,"host-cpu"),"arc").styles.bg,palette.ansi3);
+  assert.equal(find(find(tree,"host-memory"),"arc").styles.bg,palette.blocked);
   view.resources.states.set("chip",{error:"Probe disconnected",at:Date.now()});tree=view.meters("chip",{});
   assert.match(tree.styles.tooltip,/Probe disconnected/);assert.equal(find(tree,"arc"),undefined);assert.equal(text(tree),"! !");
   view.resources.states.set("chip",{value:{cpu:99,used:8,total:16},at:Date.now()-STALE-1});
@@ -125,7 +127,7 @@ test("Rings show CPU percent and used GB, with independent 60/90 percent warning
 });
 test("Warning thresholds include exactly 60 and 90 percent, with zero usage healthy",async()=>{
   const {resourceColor}=await harness();
-  assert.equal(resourceColor(0),"#8daec8");assert.equal(resourceColor(.59999),"#8daec8");
-  assert.equal(resourceColor(.6),"#e3b341");assert.equal(resourceColor(.89999),"#e3b341");
-  assert.equal(resourceColor(.9),"#ef5b5b");assert.equal(resourceColor(1),"#ef5b5b");
+  assert.equal(resourceColor(0,palette),palette.done);assert.equal(resourceColor(.59999,palette),palette.done);
+  assert.equal(resourceColor(.6,palette),palette.ansi3);assert.equal(resourceColor(.89999,palette),palette.ansi3);
+  assert.equal(resourceColor(.9,palette),palette.blocked);assert.equal(resourceColor(1,palette),palette.blocked);
 });

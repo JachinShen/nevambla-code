@@ -18,9 +18,9 @@ const VIEWS = [
 ];
 
 const STATUS = {
-  working: { label: "Working", color: "#39c67a" },
-  blocked: { label: "Needs you", color: "#ef5b5b" },
-  done: { label: "Done", color: "#4c9dff" },
+  working: { label: "Working", dot: true },
+  blocked: { label: "Needs you", dot: true },
+  done: { label: "Done", dot: true },
   idle: { label: "Seen" },
   unknown: { label: "Unknown" },
 };
@@ -68,20 +68,21 @@ export default class VscActivity extends View {
     const value = !state?.error && !stale ? state?.value : null;
     const host = on ?? "This computer";
     const title = state?.error ? `${host} · Resources unavailable\n${state.error}\nClick to retry`
-      : `${host} · Host resources · refreshes every ${INTERVAL / 1000} seconds\nYellow ≥ 60% · Red ≥ 90%`
+      : `${host} · Host resources · refreshes every ${INTERVAL / 1000} seconds\nWarning ≥ 60% · Critical ≥ 90%`
         + (value ? `\nMemory: ${gib(value.used)} / ${gib(value.total)} GB (1024³ bytes)` : "")
         + (stale ? "\nReading expired · Refreshing…" : !value || value.cpu === null ? "\nCollecting CPU baseline…" : "");
     const ring = (id, label, fraction, text) => {
-      const color = fraction == null ? t.muted : resourceColor(fraction);
-      const gauge = div().id(id).size(40).flex_none().relative().rounded(20).border(3).border_color(t.border)
+      const color = fraction == null ? t.muted : resourceColor(fraction, t);
+      const gauge = div().id(id).size(40).flex_none().relative()
         .flex().items_center().justify_center().tooltip(`${label}\n${title}`)
+        .child(div().absolute().inset_0().rounded(20).border(3).border_color(t.border))
         .child(div().text_color(color).text_size(text.length > 6 ? 8 : text.length > 5 ? 9 : 11).font_medium().child(text));
       if (fraction > 0) {
         const f = Math.max(0, Math.min(1, fraction)), path = PathBuilder.stroke(3).move_to(20, 1.5);
         if (f === 1) path.arc_to(18.5, 18.5, 0, false, true, 20, 38.5).arc_to(18.5, 18.5, 0, false, true, 20, 1.5);
         else path.arc_to(18.5, 18.5, 0, f > 0.5, true, 20 + Math.sin(f * Math.PI * 2) * 18.5, 20 - Math.cos(f * Math.PI * 2) * 18.5);
         // Path coordinates are local to this 40 px box, independent of the rail's position.
-        gauge.child(window.paint_path(path.build(), color).absolute().top(-3).left(-3).size(40));
+        gauge.child(window.paint_path(path.build(), color).absolute().top(0).left(0).size(40));
       }
       return gauge;
     };
@@ -117,8 +118,8 @@ export default class VscActivity extends View {
       .on_click(() => run("agent.focus", { terminal: a.address }))
       .child(div().size(28).flex_none().relative().flex().items_center().justify_center()
         .child(pic.flex_none())
-        .when(Boolean(status.color), el => el.child(div().id(`agent-light-${a.address}`).absolute().top(0).right(0).size(9).rounded(5)
-          .border(1).border_color(t.chrome).bg(status.color))));
+        .when(status.dot === true, el => el.child(div().id(`agent-light-${a.address}`).absolute().top(0).right(0).size(9).rounded(5)
+          .border(1).border_color(t.chrome).bg(t[a.status]))));
   }
 
   toggleAgents() {
@@ -133,7 +134,8 @@ export default class VscActivity extends View {
   render(cx) {
     const t = theme(), L = layout();
     const sideHidden = Boolean(find(L, "side")?.hidden);
-    const open = !sideHidden && find(L, "agents-list")?.hidden === false;
+    const agentsPanel = find(L, "agents-list");
+    const open = !sideHidden && Boolean(agentsPanel && !agentsPanel.hidden);
     const space = spaces().find(s => s.active), on = space?.machine ?? null;
     if (this.resources) this.refreshResources(cx);
     const shown = sideHidden ? null : find(L, "side-body")?.active;

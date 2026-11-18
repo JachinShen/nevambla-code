@@ -5,7 +5,7 @@ import { theme, run, spaces, panes, focused, checking, openOverlay, shared, setS
 import { filePanes, openFile, closeFileTab, closeOtherFiles } from "./files.js";
 import { readEditor } from "./legacy-files.js";
 
-const DOT = { working: "#39c67a", blocked: "#ef5b5b", done: "#4c9dff" };
+const DOT_STATUSES = new Set(["working", "blocked", "done"]);
 const migrationKey = space => `vsc.files.migrated:${encodeURIComponent(space)}`;
 
 export default class VscPanelbar extends View {
@@ -48,7 +48,7 @@ export default class VscPanelbar extends View {
         cx.stop_propagation();
         openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: tab.id, space: space.id } } });
       }))
-      .when(Boolean(DOT[tab.status]), el => el.child(div().size(6).flex_none().rounded(3).bg(DOT[tab.status])))
+      .when(DOT_STATUSES.has(tab.status), el => el.child(div().size(6).flex_none().rounded(3).bg(t[tab.status])))
       .child(div().flex_1().min_w(0).truncate().when(tab.active, el => el.font_semibold()).child(tab.name))
       .when(fileOnly, el => el.child(div().id(`close-${tab.id}`).size(20).flex_none().flex().items_center().justify_center().rounded(3)
         .hover(s => s.bg(t.hover).text_color(t.foreground))
@@ -86,7 +86,7 @@ export default class VscPanelbar extends View {
     return v_flex().size_full().min_h(0)
       .child(h_flex().id("panelbar").flex_1().min_h(0).w_full().min_w(0).items_center().bg(t.chrome).text_size(14).border_b(1).border_color(t.border)
         .child(div().flex_1().min_w(0).h_full().relative()
-          .child(h_flex().id("ptabs").w_full().min_w(0).h_full().pb(6).items_center().overflow_x_scroll().track_scroll(this.scroll)
+          .child(h_flex().id("ptabs").w_full().min_w(0).h_full().items_center().overflow_x_scroll().track_scroll(this.scroll)
             .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
             .children(tabs.map(tab => this.tab(tab, space, files, t)))
             .child(this.icon("p-new", "plus", "New terminal", () => run("tab.new", { space: space.id }))))

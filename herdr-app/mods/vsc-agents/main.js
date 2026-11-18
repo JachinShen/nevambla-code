@@ -4,7 +4,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
-const STATUS_COLOR = { blocked: "#ef5b5b", working: "#39c67a", done: "#4c9dff" };
+const DOT_STATUSES = new Set(["working", "blocked", "done"]);
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -211,7 +211,7 @@ export default class Agents extends View {
   // Viewed idle agents leave the status slot empty.
   status(t, a, compact = false) {
     return div().size(8).mx(3).flex_none().rounded(4)
-      .when(Boolean(STATUS_COLOR[a.status]), el => el.bg(STATUS_COLOR[a.status]));
+      .when(DOT_STATUSES.has(a.status), el => el.bg(t[a.status]));
   }
 
   render(cx) {
@@ -257,7 +257,7 @@ export default class Agents extends View {
         .items_center()
         .rounded(4)
         .text_size(11)
-        .text_color(open ? t.dim : (STATUS_COLOR[top] ?? t.dim))
+        .text_color(!open && DOT_STATUSES.has(top) ? t[top] : t.dim)
         .cursor_pointer()
         .hover((s) => s.bg(t.hover).text_color(t.foreground))
         .on_click((_e, cx) => {
@@ -389,7 +389,7 @@ export default class Agents extends View {
           open ? this.folded.add(g.id) : this.folded.delete(g.id);
           cx.notify();
         })
-        .child(div().truncate().text_color(STATUS_COLOR[g.status] ?? t.dim).child(g.label))
+        .child(div().truncate().text_color(DOT_STATUSES.has(g.status) ? t[g.status] : t.dim).child(g.label))
         .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
         .child(div().flex_1())
         .when(!open, (el) => el

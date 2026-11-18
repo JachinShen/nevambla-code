@@ -2,7 +2,7 @@
 # Install nevambla-code:
 #   1. herdr/config.toml      -> ~/.config/herdr/config.toml        (herdr, the terminal app)
 #   2. herdr-app/             -> ~/.config/herdr-app                 (the herdr desktop window)
-#      the nevambla-code layout, its vsc-* mods, the dracula theme and its shortcuts
+#      the nevambla-code layout, its vsc-* mods, themes and shortcuts
 #   3. fonts/                 -> your user font folder               (JetBrainsMono Nerd Font)
 # Anything it would replace is backed up first to ~/.config/nevambla-code-backups/<time>/.
 # Shortcuts are merged: personal bindings are kept, older layout presets migrate.
@@ -43,7 +43,9 @@ fi
 # 2. Desktop layout ------------------------------------------------------------
 if [ -d "$APP" ]; then
   put "$REPO/herdr-app/layouts/nevambla-code.json" "$APP/layouts/nevambla-code.json"
-  put "$REPO/herdr-app/themes/dracula.json" "$APP/themes/dracula.json"
+  for theme in "$REPO"/herdr-app/themes/*.json; do
+    put "$theme" "$APP/themes/$(basename "$theme")"
+  done
   for mod in "$REPO"/herdr-app/mods/*/; do
     name="$(basename "$mod")"
     put "${mod%/}" "$APP/mods/$name"
@@ -72,7 +74,7 @@ for section, keys in new.items():
 json.dump(cur, open(dest, "w"), indent=2)
 open(dest, "a").write("\n")
 EOF
-  say "Installed the nevambla-code layout, its mods and the dracula theme in $APP"
+  say "Installed the nevambla-code layout, its mods and themes in $APP"
 
   if command -v herdr-app >/dev/null 2>&1; then
     for mod in "$REPO"/herdr-app/mods/*/; do
