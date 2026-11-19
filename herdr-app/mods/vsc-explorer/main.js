@@ -3,7 +3,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { fileIcon, folderIcon, ICON_FONT } from "./icons.js";
-import { exec, watchFolder, theme, shared, setShared, layout, checking, run, openOverlay } from "herdr";
+import { exec, watchFolder, theme, shared, setShared, layout, checking, run, openOverlay, closeOverlay, props, spaces, panes, focused } from "herdr";
 import { findNode, terminalLocation, browsingLocation as location } from "./navigation.js";
 import { activeFile, currentSpace, openFile } from "./files.js";
 import { gitRoot, withGitIgnores } from "./git.js";
@@ -24,6 +24,12 @@ async function directory(path, on) {
 
 export default class VscExplorer extends View {
   init(_p, cx) {
+    if (typeof props()?.copyPath === "string") {
+      this.menuIndex = 0;
+      this.menuFocus = cx.focus_handle();
+      this.menuFocus.focus();
+      return;
+    }
     this.saved = new Map(); this.entries = new Map(); this.folders = new Set(); this.marks = {}; this.rootOpen = true;
     this.folderErrors = new Map(); this.folderLoads = new Map();
     this.scroll = ScrollHandle.new();
@@ -140,27 +146,76 @@ export default class VscExplorer extends View {
     return div().w(16).flex_none().flex().justify_center().font_family(ICON_FONT).text_size(14).text_color(color).child(char);
   }
 
-  row({ e, path, depth }, t, active) {
+  canDragPaths() {
+    const space = spaces().find(s => s.active);
+    const tab = space?.tabs.find(t => t.active);
+    const on = this.context?.on ?? null;
+    if (!this.context?.cwd || !tab || space.machine !== on) return false;
+
+    const onSource = address => (address.includes("/") ? address.split("/")[0] : null) === on;
+    const focus = focused();
+    const terminal = focus?.shown ?? focus?.terminal;
+    const tabTerminals = panes().filter(p => p.tab === tab.id && p.terminal);
+    return Boolean(terminal || tabTerminals.length) && (!terminal || onSource(terminal))
+      && tabTerminals.every(p => onSource(p.terminal));
+  }
+
+  pathActions(row, path, canDrag, fileName) {
+    const on = this.context.on ?? null;
+    return row.when(canDrag, el => el.drag_paths([path], { on }))
+      .on_mouse_down("right", (_e, cx) => {
+        cx.stop_propagation();
+        const source = fileName ? { on, path, name: fileName } : null;
+        openOverlay({ mod: "vsc-explorer", kind: "popup", width: 168, props: { copyPath: path, source } });
+      });
+  }
+
+  pathMenu({ copyPath, overlay, source }) {
+    const t = theme();
+    const items = [{ id: "copy-path", label: "复制路径", action: cx => cx.write_to_clipboard(copyPath) }];
+    if (source) items.push({
+      id: "transfer-file", label: "传到另一台机器…",
+      action: () => openOverlay({ mod: "vsc-transfer", kind: "dialog", modal: true, width: 590, height: 410, props: { source } }),
+    });
+    const choose = (index, cx) => {
+      closeOverlay(overlay);
+      items[index].action(cx);
+    };
+    return v_flex().id("path-menu").role("menu").track_focus(this.menuFocus).w_full().p(5).bg(t.popover).text_size(12.8)
+      .on_key_down((e, cx) => {
+        if (e.key === "enter") {
+          cx.stop_propagation();
+          choose(this.menuIndex, cx);
+        } else if (e.key === "down" || e.key === "up") {
+          cx.stop_propagation();
+          this.menuIndex = (this.menuIndex + items.length + (e.key === "down" ? 1 : -1)) % items.length;
+          cx.notify();
+        }
+      })
+      .children(items.map(({ id, label }, index) => h_flex().id(id).role("menu_item").h(31).px(8).items_center()
+        .rounded(7).text_color(t.foreground).cursor_pointer()
+        .when(index === this.menuIndex, el => el.bg(t.selected).aria_active_descendant())
+        .hover(s => s.bg(t.hover)).on_click((_e, cx) => choose(index, cx)).child(label)));
+  }
+
+  row({ e, path, depth }, t, active, canDrag) {
     const abs = join(this.context.cwd, path), open = this.folders.has(path);
-    const source = { on: this.context.on, path: abs, name: e.name };
     const mark = this.marks[abs], sel = abs === active;
     const markColor = e.ignored ? t.dim : mark === "U" || mark === "A" ? t.ansi2 : mark === "D" ? t.ansi1 : t.blocked;
     const [glyph, color] = e.dir ? folderIcon(open) : fileIcon(e.name);
-    return h_flex().id(`f-${path}`).h(22).flex_none().pl(12 + depth * 12).pr(10).gap(5).items_center().cursor_pointer()
+    return this.pathActions(h_flex().id(`f-${path}`), abs, canDrag, e.dir ? null : e.name)
+      .h(22).flex_none().pl(12 + depth * 12).pr(10).gap(5).items_center().cursor_pointer()
       .when(sel, el => el.bg(t.selected)).hover(s => s.bg(sel ? t.selected : t.hover))
       .on_click((_e, cx) => e.dir ? this.toggle(path, cx) : this.open(path, cx))
       .child(e.dir ? svg(`mods/vsc-explorer/chevron-${open ? "down" : "right"}.svg`).size(14).flex_none().text_color(e.ignored ? t.dim : t.muted)
                    : div().w(14).flex_none())
       .child(this.glyph([glyph, e.ignored ? t.dim : color]))
       .child(div().flex_1().min_w(0).truncate().text_color(e.ignored ? t.dim : mark && mark !== "•" ? markColor : t.foreground).child(e.name))
-      .when(!e.dir, el => el.child(div().id(`transfer-${path}`).w(22).h(20).flex_none().flex().items_center().justify_center()
-        .rounded(3).text_color(t.muted).hover(s => s.bg(t.raised).text_color(t.foreground)).tooltip("传到另一台机器…")
-        .on_click((_event, cx) => { cx.stop_propagation(); openOverlay({ mod: "vsc-transfer", kind: "dialog", modal: true, width: 590, height: 410, props: { source: { ...source, on: source.on ?? null } } }); })
-        .child(svg("mods/vsc-explorer/transfer.svg").size(14))))
       .when(Boolean(mark), el => el.child(div().flex_none().text_size(11).text_color(markColor).child(mark)));
   }
 
   render(cx) {
+    if (this.menuFocus) return this.pathMenu(props());
     if (!checking() && key() !== this.context?.key) this.refresh(cx);
     const completed = shared("vsc.transfer.completed");
     if (!checking() && completed && this.completedToken !== completed.token) {
@@ -179,6 +234,7 @@ export default class VscExplorer extends View {
     const name = (this.context?.cwd ?? "").split("/").filter(Boolean).pop() ?? "";
     const items = this.rootOpen ? this.flatten("", 0, []) : [];
     const error = [this.error, ...this.folderErrors.values()].filter(Boolean).join("\n");
+    const canDrag = this.canDragPaths();
     return v_flex().id("explorer").size_full().min_h(0).bg(t.chrome).text_color(t.foreground).text_size(13)
       .child(h_flex().h(35).flex_none().px(20).gap(8).items_center().text_size(11).text_color(t.muted).child("EXPLORER")
         .child(div().flex_1().min_w(0).truncate().child(this.context?.on ? `SSH · ${this.context.on}` : ""))
@@ -197,11 +253,12 @@ export default class VscExplorer extends View {
           .on_click(() => run("mod.open", { name: "vsc-jump" }))
           .child(svg("mods/vsc-explorer/arrow-up-right.svg").size(16))))
       .child(h_flex().id("root").h(22).flex_none().px(4).gap(4).items_center().cursor_pointer().text_size(11).font_semibold()
+        .when(Boolean(this.context?.cwd), el => this.pathActions(el, this.context.cwd, canDrag))
         .on_click((_e, cx) => { this.rootOpen = !this.rootOpen; cx.notify(); })
         .child(svg(`mods/vsc-explorer/chevron-${this.rootOpen ? "down" : "right"}.svg`).size(14).text_color(t.muted))
         .child(div().truncate().child(name.toUpperCase() || "NO FOLDER")))
       .when(this.rootOpen && items.length > 0, el => el.child(v_flex().id("tree").flex_1().min_h(0).overflow_y_scrollbar().track_scroll(this.scroll).pb(8)
-        .children(items.map(it => this.row(it, t, active)))))
+        .children(items.map(it => this.row(it, t, active, canDrag)))))
       .when(this.rootOpen && (Boolean(error) || !items.length), el => el.child(div().px(20).py(6).text_size(12).text_color(error ? t.ansi1 : t.dim)
         .child(error || (this.loading ? "Loading…" : "Empty folder"))));
   }

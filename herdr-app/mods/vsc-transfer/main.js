@@ -11,7 +11,7 @@ export default class FileTransfer extends View {
     this.error = null;
     if (!this.source || typeof this.source.path !== "string" || !this.source.path.startsWith("/") || !(this.source.on === null || typeof this.source.on === "string")) {
       this.source = { on: null, path: "", name: "未选择文件" };
-      if (!checking()) this.error = "未提供有效的源文件，请从文件树点击文件旁的传输按钮";
+      if (!checking()) this.error = "未提供有效的源文件，请在文件树中右键文件并选择「传到另一台机器…」";
     }
     this.handle = cx.focus_handle();
     this.busy = false;

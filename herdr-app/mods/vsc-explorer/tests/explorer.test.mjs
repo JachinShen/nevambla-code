@@ -20,7 +20,9 @@ function uiElement() {
       if (key === "child") obj.nodes.push(args[0]);
       else if (key === "children") obj.nodes.push(...args[0]);
       else if (key === "when") { if (args[0]) args[1](proxy); }
+      else if (key === "on_mouse_down") (obj.handlers[key] ??= {})[args[0]] = args[1];
       else if (key.startsWith("on_")) obj.handlers[key] = args[0];
+      else if (key === "drag_paths") obj.styles[key] = args;
       else obj.styles[key] = args[0];
       return proxy;
     };
@@ -29,21 +31,26 @@ function uiElement() {
 }
 
 async function harness(cwd, machine = null) {
-  const state = { cwd, machine, calls: [], pending: [], shared: {}, overlays: [] };
+  const state = { cwd, machine, calls: [], pending: [], shared: {}, overlays: [], closed: [], clipboard: [] };
   state.exec = async (cmd, args, options) => {
     if (cmd === "env") return {code:0,stderr:"",stdout:JSON.stringify({space:"workspace",tab:"native-tab",pane:"native-pane"})};
     try { return { code: 0, ...await run(cmd, args, { cwd: options?.cwd }) }; }
     catch (e) { return { code: e.code, stdout: e.stdout ?? "", stderr: e.stderr ?? e.message }; }
   };
   const host = {
-    spaces: () => [{ id: "workspace", active: true, folder: state.cwd, machine: state.machine, tabs: [{id:"native-tab"}] }],
-    panes: () => [{ pane: "pane", cwd: state.cwd }], focused: () => ({ pane: "pane" }),
+    spaces: () => [{ id: "workspace", active: true, folder: state.cwd, machine: state.machine, tabs: [{ id: "native-tab", active: true }] }],
+    panes: () => [
+      { pane: "pane", tab: "native-tab", cwd: state.cwd, terminal: state.machine ? `${state.machine}/t1` : "t1" },
+      ...(state.additionalPanes ?? []),
+    ],
+    focused: () => ({ pane: "pane", terminal: state.focusedTerminal }),
     shared: name => state.shared[name], setShared: (name, value) => { state.shared[name] = value; },
     appHome: () => "/app", notify() {},
     layout: () => ({ id: "editor-2", hidden: true }), run() {}, checking: () => true,
     exec: (...args) => { state.calls.push(args); return state.exec(...args); },
     watchFolder: async () => { throw new Error("Watching is outside these regression tests"); },
     theme: () => ({}), openOverlay: value => state.overlays.push(value),
+    props: () => state.props, closeOverlay: id => state.closed.push(id),
   };
   const ui = { View: class {}, div: uiElement, svg: uiElement, v_flex: uiElement, h_flex: uiElement,
     ScrollHandle: { new: () => ({ scroll_to_item() {} }) } };
@@ -65,12 +72,24 @@ async function harness(cwd, machine = null) {
   const main = await load(path.join(root, "main.js"));
   await main.evaluate();
   const view = new main.namespace.default();
-  const cx = { notify() {}, timer: { every() {} }, spawn(fn) { state.pending.push(fn(cx)); } };
+  const cx = {
+    notify() {}, stop_propagation() {}, timer: { every() {} }, spawn(fn) { state.pending.push(fn(cx)); },
+    focus_handle: () => ({ focus() {} }), write_to_clipboard: text => state.clipboard.push(text),
+  };
   view.init(null, cx);
   view.watch = () => {};
   state.drain = async () => { while (state.pending.length) await Promise.all(state.pending.splice(0)); };
   state.refresh = async () => { view.refresh(cx); await state.drain(); };
   state.expand = async folder => { view.toggle(folder, cx); await state.drain(); };
+  state.popup = (index = state.overlays.length - 1) => {
+    const opened = state.overlays[index];
+    assert.equal(opened.mod, "vsc-explorer");
+    assert.equal(opened.kind, "popup");
+    state.props = { ...opened.props, overlay: `overlay-${index}` };
+    const popup = new main.namespace.default();
+    popup.init(null, cx);
+    return popup.render(cx);
+  };
   return { state, view, cx };
 }
 
@@ -128,14 +147,82 @@ test("Ignored rows keep file opening, directory expansion and transfers, with di
   file.handlers.on_click({}, cx);
   await state.drain();
   assert.equal(state.shared["vsc.file-panes"]["native-pane"].file.path, path.join(repo, "debug.log"));
-  file.nodes[3].handlers.on_click({}, { stop_propagation() {} });
-  assert.equal(state.overlays[0].props.source.path, path.join(repo, "debug.log"));
+  file.handlers.on_mouse_down.right({}, cx);
+  const transfer = state.popup().nodes.find(node => node.styles.id === "transfer-file");
+  assert.equal(transfer.nodes[0], "传到另一台机器…");
+  transfer.handlers.on_click({}, cx);
+  const dialog = state.overlays.at(-1);
+  assert.equal(dialog.mod, "vsc-transfer");
+  assert.equal(dialog.kind, "dialog");
+  assert.equal(dialog.modal, true);
+  assert.deepEqual({ ...dialog.props.source }, { on: null, path: path.join(repo, "debug.log"), name: "debug.log" });
+  assert.equal(state.closed[0], "overlay-0");
   const folder = view.row({ e: entry(view, "cache"), path: "cache", depth: 0 }, tints, null);
   assert.equal(folder.nodes[0].styles.text_color, tints.dim);
   assert.equal(folder.nodes[1].styles.text_color, tints.dim);
   folder.handlers.on_click({}, cx);
   await state.drain();
   assert.equal(entry(view, "child.txt", "cache").ignored, true);
+});
+
+test("Path actions capture the absolute path and source machine for local and SSH files and folders", async t => {
+  const { repo } = await fixture(t);
+  const { state, view, cx } = await harness(repo, "ssh-a");
+  const name = "中文 file's.md";
+  await writeFile(path.join(repo, "nested", name), "example\n");
+  await state.refresh();
+  await state.expand("nested");
+  const root = () => view.render(cx).nodes.find(node => node.styles?.id === "root");
+  const row = id => view.render(cx).nodes.find(node => node.styles?.id === "tree").nodes.find(node => node.styles?.id === `f-${id}`);
+  const folder = row("nested");
+  const file = row(`nested/${name}`);
+  const assertDrag = (row, expectedPath, expectedMachine) => {
+    const [paths, options] = row.styles.drag_paths;
+    assert.deepEqual([...paths], [expectedPath]);
+    assert.equal(options.on, expectedMachine);
+  };
+  assertDrag(root(), repo, "ssh-a");
+  assertDrag(folder, path.join(repo, "nested"), "ssh-a");
+  const absolute = path.join(repo, "nested", name);
+  assertDrag(file, absolute, "ssh-a");
+  file.handlers.on_mouse_down.right({}, cx);
+
+  state.machine = null;
+  await state.refresh();
+  state.additionalPanes = [{ tab: "background-tab", terminal: "ssh-a/t2" }];
+  assertDrag(root(), repo, null);
+  state.additionalPanes[0].tab = "native-tab";
+  assert.equal(root().styles.drag_paths, undefined);
+  assert.equal(row("normal.txt").styles.drag_paths, undefined);
+  state.additionalPanes = [];
+  state.focusedTerminal = "ssh-a/t2";
+  assert.equal(root().styles.drag_paths, undefined);
+  root().handlers.on_mouse_down.right({}, cx);
+  state.focusedTerminal = null;
+  assertDrag(root(), repo, null);
+  const before = state.calls.length;
+
+  for (const [index, expectedPath] of [absolute, repo].entries()) {
+    const menu = state.popup(index);
+    const item = menu.nodes[0];
+    assert.equal(item.nodes[0], "复制路径");
+    if (index === 0) item.handlers.on_click({}, cx);
+    else menu.handlers.on_key_down({ key: "enter" }, cx);
+    assert.equal(state.clipboard[index], expectedPath);
+    assert.equal(state.closed[index], `overlay-${index}`);
+    assert.equal(menu.nodes.length, index === 0 ? 2 : 1);
+  }
+  row("nested").handlers.on_mouse_down.right({}, cx);
+  assert.deepEqual(state.popup().nodes.map(node => node.styles.id), ["copy-path"]);
+
+  const remoteMenu = state.popup(0);
+  remoteMenu.handlers.on_key_down({ key: "down" }, cx);
+  remoteMenu.handlers.on_key_down({ key: "enter" }, cx);
+  const dialog = state.overlays.at(-1);
+  assert.equal(dialog.mod, "vsc-transfer");
+  assert.deepEqual({ ...dialog.props.source }, { on: "ssh-a", path: absolute, name });
+  assert.equal(state.closed.at(-1), "overlay-0");
+  assert.equal(state.calls.length, before);
 });
 
 test("Rules refresh after .gitignore changes and apply in Git worktrees", async t => {
