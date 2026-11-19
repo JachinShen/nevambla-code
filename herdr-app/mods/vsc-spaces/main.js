@@ -3,7 +3,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, watchFolder, window, layout, checking } from "herdr";
+import { spaces, machines, panes, run, openOverlay, exec, hc, theme, watchFolder, window, layout, checking, props } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -278,8 +278,13 @@ export default class Spaces extends View {
   }
 
   menu(w) {
-    // A popup is as tall as its items; height is only the most.
-    openOverlay({ mod: "menu", kind: "popup", width: 200, height: 260, props: { tab: "space", target: { id: w.id } } });
+    openOverlay({
+      mod: "vsc-space-menu",
+      kind: "popup",
+      width: 230,
+      height: 260,
+      props: { space: w.id, protected_worktree_repos: props()?.protected_worktree_repos ?? [] },
+    });
   }
 
   orderingDue(now) {

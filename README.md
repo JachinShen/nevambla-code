@@ -45,6 +45,23 @@ Open the herdr desktop app once before running it, so `~/.config/herdr-app` exis
 
 Select **victoria** in the desktop theme picker for the dark green and brass palette adapted from herdr-web-ui.
 
+### Worktree archive protection
+
+The Spaces menu checks Git worktree locks before offering removal. Linked checkouts also offer **New terminal in worktree**. To require archiving for a repository, add a rule to `content.props.protected_worktree_repos` on the `vsc-spaces` block in your installed layout.
+
+```json
+"content": {
+  "mod": "vsc-spaces",
+  "props": {
+    "protected_worktree_repos": [
+      { "machine": "ssh-dev", "root": "/projects/example" }
+    ]
+  }
+}
+```
+
+`root` is the absolute path to the main Git checkout. Use the registered machine name or `null` for this computer. The menu shows **Archive required before removal** for matching linked checkouts and leaves removal to your archive workflow.
+
 ### Optional tools
 
 - Native file tabs and image previews: local `python3`, `hc` and `herdr-app`. Ordinary text previews do not need Jupyter. Host resources require `python3` and either readable Linux `/proc` counters or macOS's built-in Mach, `sysctl` and `vm_stat` interfaces; no extra service is installed.
@@ -57,7 +74,7 @@ Select **victoria** in the desktop theme picker for the dark green and brass pal
 As herdr asks for shared layouts:
 
 - **Network:** when enabled with title bar `props.show_usage: true`, the usage meter (`vsc-titlebar/usage.sh`) reads your Claude Code login from the macOS Keychain and asks `api.anthropic.com` for your plan usage, the same data as Claude Code's `/usage`. The token stays inside that script. It is macOS only; elsewhere it shows no data.
-- **Programs:** native file tabs are created through `herdr-app do tab.new`. Local Python uses the public `hc connect` document API to attach each file pane's actual ID to its persisted props; version checks preserve concurrent layout changes. The Spaces panel runs `hc machine ls` and reads Git references on the machines it lists. Path navigation and Git previews run `python3` and `git` on the selected machine through Herdr. `vsc-activity` runs a short Python probe through Herdr on the active Space's machine to read CPU and memory counters. macOS uses Mach plus `/usr/sbin/sysctl` and `/usr/bin/vm_stat`; Linux reads `/proc`. It creates no remote files or background service. Transfers and SSH image previews use `hc machine ls` to resolve registered SSH targets and the local `/usr/bin/ssh` command, including the user's SSH configuration. SSH command streams preserve the same filesystem namespace as the remote shell and verify size and SHA-256. Transfers publish a numbered sibling if the destination exists. Errors remain visible. The editor also runs `python3` (notebooks, through `vsc-editor/kernel.py`), `pdftoppm` / `pdfinfo` (PDFs) and `open` (Open in Preview).
+- **Programs:** native file tabs are created through `herdr-app do tab.new`. Local Python uses the public `hc connect` document API to attach each file pane's actual ID to its persisted props; version checks preserve concurrent layout changes. The Spaces panel runs `hc machine ls` and reads Git references on the machines it lists. Its worktree menu reads Git's worktree list and lock status on the selected machine. Path navigation and Git previews run `python3` and `git` on the selected machine through Herdr. `vsc-activity` runs a short Python probe through Herdr on the active Space's machine to read CPU and memory counters. macOS uses Mach plus `/usr/sbin/sysctl` and `/usr/bin/vm_stat`; Linux reads `/proc`. It creates no remote files or background service. Transfers and SSH image previews use `hc machine ls` to resolve registered SSH targets and the local `/usr/bin/ssh` command, including the user's SSH configuration. SSH command streams preserve the same filesystem namespace as the remote shell and verify size and SHA-256. Transfers publish a numbered sibling if the destination exists. Errors remain visible. The editor also runs `python3` (notebooks, through `vsc-editor/kernel.py`), `pdftoppm` / `pdfinfo` (PDFs) and `open` (Open in Preview).
 - **Files:** the Explorer and editor read files on their captured source machine and save local files with a conflict check. Temporary file-transfer payloads are staged locally or in the destination directory, then removed. Destination preferences, file-pane metadata and recoverable unsaved buffers stay in local shared state. Images, PDF pages and notebook state are cached in `~/.config/herdr-app/data/vsc-editor/`.
 
 ## Fork development
@@ -67,7 +84,7 @@ As herdr asks for shared layouts:
 Run the portable regressions from the checkout:
 
 ```sh
-node --experimental-vm-modules --test herdr-app/mods/vsc-activity/tests/activity.test.mjs herdr-app/mods/vsc-explorer/tests/explorer.test.mjs herdr-app/mods/vsc-changes/tests/changes.test.mjs herdr-app/mods/vsc-editor/tests/diff.test.mjs herdr-app/mods/vsc-editor/tests/source.test.mjs herdr-app/mods/vsc-editor/tests/tabs.test.mjs herdr-app/mods/vsc-titlebar/tests/usage.test.mjs herdr-app/mods/vsc-activity/tests/resources.test.mjs
+node --experimental-vm-modules --test herdr-app/mods/vsc-space-menu/tests/menu.test.mjs herdr-app/mods/vsc-activity/tests/activity.test.mjs herdr-app/mods/vsc-explorer/tests/explorer.test.mjs herdr-app/mods/vsc-changes/tests/changes.test.mjs herdr-app/mods/vsc-editor/tests/diff.test.mjs herdr-app/mods/vsc-editor/tests/source.test.mjs herdr-app/mods/vsc-editor/tests/tabs.test.mjs herdr-app/mods/vsc-titlebar/tests/usage.test.mjs herdr-app/mods/vsc-activity/tests/resources.test.mjs
 python3 -B -m unittest discover -s herdr-app/mods/vsc-explorer/tests -p 'test_*.py' -k Integrity
 python3 -B -m unittest discover -s herdr-app/mods/vsc-editor/tests -p 'test_*.py'
 python3 -B -m unittest discover -s herdr-app/mods/vsc-activity/tests -p 'test_*.py'
