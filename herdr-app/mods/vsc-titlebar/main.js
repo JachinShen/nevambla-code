@@ -30,12 +30,6 @@ function find(node, id) {
 }
 const stop = (_e, cx) => cx.stop_propagation();
 
-// Local time, 24h: "23:20".
-function clock() {
-  const d = new Date(), p = n => String(n).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 // "3h 27m" / "5d 14h" until an ISO time.
 function until(iso) {
   const m = Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60000));
@@ -46,13 +40,10 @@ function until(iso) {
 
 export default class VscTitlebar extends View {
   init(_p, cx) {
-    if (checking()) return;
-    if (showUsage()) {
-      this.fetch(cx);
-      cx.timer.every(300000, cx => this.fetch(cx));  // every 5 minutes
-    }
-    // The clock and the countdowns change once a minute: redraw on the minute, not more often
-    // (every redraw of a mod redraws the whole window).
+    if (checking() || !showUsage()) return;
+    this.fetch(cx);
+    cx.timer.every(300000, cx => this.fetch(cx));
+    // Refresh the usage countdowns on each minute boundary.
     cx.timer.after(60000 - (Date.now() % 60000) + 50, cx => { cx.notify(); cx.timer.every(60000, cx => cx.notify()); });
   }
 
@@ -146,8 +137,7 @@ export default class VscTitlebar extends View {
         .on_mouse_down("left", stop).on_click(() => run("app.palette"))
         .child(svg("mods/vsc-titlebar/search.svg").size(12).text_color(t.dim))
         .child(div().truncate().child(title)))
-      .child(h_flex().flex_1().min_w(0).h_full().pr(10).gap(2).items_center().justify_end()
-        .child(this.icon("t-side", "panel-left", !find(L, "side")?.hidden, () => run("layout.toggle", { id: "side" })))
-        .child(div().pl(12).text_color(t.foreground).child(clock())));
+      .child(h_flex().flex_1().min_w(0).h_full().pr(10).items_center().justify_end()
+        .child(this.icon("t-side", "panel-left", !find(L, "side")?.hidden, () => run("layout.toggle", { id: "side" }))));
   }
 }

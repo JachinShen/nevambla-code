@@ -17,7 +17,7 @@ JachinShen’s fork of [nevambla/nevambla-code](https://github.com/nevambla/neva
 
 ## The layout
 
-- **Title bar:** a centered command center that opens the palette, a side bar toggle, and a clock.
+- **Title bar:** a centered command center that opens the palette and a side bar toggle.
 - **Path navigation and transfers:** ⌘⇧O opens a local or remote terminal path in Explorer. The file tree’s transfer action copies a file between this computer and a registered SSH machine, or between two SSH machines. Completed transfers offer the full destination path for copying.
 - **Activity bar:** switches the side bar between Explorer, Changes and Spaces. The Spaces view uses the same compact rows as Explorer and Source Control, grouping spaces by machine and nesting worktrees under their checkouts. A Space with an explicit folder keeps that checkout in the sidebar when a pane changes directories. Space actions open in a context menu, and the workspace fills the width beside the sidebar. Agent icons sit above Settings, with a small arrow below them to expand the list.
 - **Side bar:** the file tree of the focused pane’s folder, with room for an optional Agents panel below. The refresh button reloads the current machine's file tree and Git status, preserving expanded folders. Git-ignored files and folders stay browsable with dimmed names and icons, locally and over SSH. Source Control follows the folder selected in Explorer; selecting a change opens a read-only diff tab in the main editor, including staged and unstaged changes against HEAD.
