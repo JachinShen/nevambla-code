@@ -25,7 +25,7 @@ async function directory(path, on) {
 export default class VscExplorer extends View {
   init(_p, cx) {
     this.saved = new Map(); this.entries = new Map(); this.folders = new Set(); this.marks = {}; this.rootOpen = true;
-    this.folderErrors = new Map();
+    this.folderErrors = new Map(); this.folderLoads = new Map();
     this.scroll = ScrollHandle.new();
     if (checking()) return;
     this.refresh(cx);
@@ -37,7 +37,11 @@ export default class VscExplorer extends View {
   current(ctx) { return this.context === ctx && key() === ctx.key; }
 
   async loadFolder(path, ctx) {
-    const current = () => this.current(ctx) && (!path || this.folders.has(path));
+    if (!this.current(ctx) || (path && !this.folders.has(path))) return;
+    const request = Symbol();
+    const loads = this.folderLoads;
+    loads.set(path, request);
+    const current = () => this.current(ctx) && loads.get(path) === request;
     const cwd = path ? join(ctx.cwd, path) : ctx.cwd;
     try {
       const entries = (await directory(cwd, ctx.on)).slice(0, PER_FOLDER)
@@ -49,6 +53,7 @@ export default class VscExplorer extends View {
       if (!current()) return;
       this.entries.set(path, classified); this.folderErrors.delete(path);
     } catch (e) { if (current()) this.folderErrors.set(path, String(e)); }
+    finally { if (loads.get(path) === request) loads.delete(path); }
   }
 
   watch(ctx, cx) {
@@ -65,7 +70,7 @@ export default class VscExplorer extends View {
     if (next !== this.context?.key) {
       if (this.context) this.saved.set(this.context.key, this.folders);
       this.context = { key: next, cwd, on }; this.entries = new Map(); this.folders = new Set(this.saved.get(next));
-      this.marks = {}; this.folderErrors = new Map(); this.watched = null; this.error = null; this.loading = false;
+      this.marks = {}; this.folderErrors = new Map(); this.folderLoads = new Map(); this.watched = null; this.error = null; this.loading = false;
     }
     if (!cwd || this.loading) return;
     const ctx = this.context; this.loading = true;
@@ -99,7 +104,9 @@ export default class VscExplorer extends View {
 
   toggle(path, cx) {
     if (this.folders.has(path)) {
-      for (const f of [...this.folders]) if (f === path || f.startsWith(path + "/")) { this.folders.delete(f); this.entries.delete(f); this.folderErrors.delete(f); }
+      for (const f of [...this.folders]) if (f === path || f.startsWith(path + "/")) {
+        this.folders.delete(f); this.entries.delete(f); this.folderErrors.delete(f); this.folderLoads.delete(f);
+      }
     } else {
       this.folders.add(path);
       const ctx = this.context;
@@ -179,6 +186,12 @@ export default class VscExplorer extends View {
           .cursor_pointer().tooltip("返回终端当前目录").hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click((_event, cx) => { setShared("vsc.explorer.jump", null); this.refresh(cx); })
           .child(svg("mods/vsc-explorer/corner-up-left.svg").size(16))))
+        .when(Boolean(this.context?.cwd), el => el.child(div().id("refresh-explorer").size(24).flex_none().flex().items_center().justify_center().rounded(4)
+          .text_size(16).text_color(this.loading ? t.dim : t.muted)
+          .tooltip(this.loading ? "正在刷新文件列表…" : "刷新文件列表")
+          .when(!this.loading, button => button.cursor_pointer().hover(s => s.bg(t.hover).text_color(t.foreground))
+            .on_click((_event, cx) => { this.refresh(cx); cx.notify(); }))
+          .child("↻")))
         .child(div().id("jump-path").size(24).flex_none().flex().items_center().justify_center().rounded(4)
           .cursor_pointer().tooltip("跳转到路径 ⌘⇧O").hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => run("mod.open", { name: "vsc-jump" }))

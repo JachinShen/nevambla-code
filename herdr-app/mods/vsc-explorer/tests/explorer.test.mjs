@@ -226,6 +226,43 @@ test("Remote reads and expansions retain the captured machine, and discard stale
   assert(state.calls.slice(before).every(([_cmd, _args, options]) => options.on === "ssh-b" && (options.cwd === "/repo-b/cache" || !options.cwd)));
 });
 
+test("The refresh button reloads the remote tree without collapsing folders or accepting a stale expansion", async t => {
+  const { repo } = await fixture(t);
+  const { state, view, cx } = await harness(repo, "ssh-a");
+  await state.refresh();
+
+  const exec = state.exec;
+  let release;
+  state.exec = async (cmd, args, options) => {
+    if (args[2] === "files" && args[3] === path.join(repo, "nested")) {
+      const oldListing = await exec(cmd, args, options);
+      return new Promise(resolve => { release = () => resolve(oldListing); });
+    }
+    return exec(cmd, args, options);
+  };
+  view.toggle("nested", cx);
+  const staleExpansion = state.pending.shift();
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  state.exec = exec;
+  await writeFile(path.join(repo, "new-root.txt"), "remote root\n");
+  await writeFile(path.join(repo, "nested", "new-child.txt"), "remote child\n");
+
+  const button = () => view.render(cx).nodes[0].nodes.find(node => node.styles?.id === "refresh-explorer");
+  const before = state.calls.length;
+  button().handlers.on_click({}, cx);
+  assert.equal(button().handlers.on_click, undefined);
+  await state.drain();
+  release();
+  await staleExpansion;
+
+  assert(state.calls.slice(before).every(([_cmd, _args, options]) => options.on === "ssh-a"));
+  assert(view.folders.has("nested"));
+  assert(entry(view, "new-root.txt"));
+  assert(entry(view, "new-child.txt", "nested"));
+  assert.equal(view.marks[path.join(repo, "nested", "new-child.txt")], "U");
+  assert.equal(typeof button().handlers.on_click, "function");
+});
+
 test("A missing Git executable is an explicit error rather than an unignored tree", async t => {
   const { repo } = await fixture(t);
   const { state, view } = await harness(repo);
