@@ -17,11 +17,12 @@ function find(node, id) {
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 
-// Where a space is now: its first terminal's live folder, else where it was made.
+// An explicit folder anchors the Space's checkout, even when a pane changes folders.
 // `ps`: panes(), read once by the caller (each read copies every pane).
 function place(s, ps) {
+  if (s.folder) return s.folder;
   const tabs = new Set((s.tabs ?? []).map((c) => c.id));
-  return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
+  return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd;
 }
 const RAIL_CELL = 32;
 const railCell = (el) => h_flex().flex_none().justify_center().child(el);
