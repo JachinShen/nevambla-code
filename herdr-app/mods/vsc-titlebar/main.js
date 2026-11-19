@@ -117,11 +117,14 @@ export default class VscTitlebar extends View {
     const w = window(), trafficLights = w?.platform === "macos" && !w.fullscreen;
     const inset = trafficLights ? 80 : 14;
     const toggleSize = 24, usageGap = 8;
+    // The macOS buttons are anchored to the window top, 8 px below their configured inset.
+    const trafficLightCenter = (L?.traffic_lights?.[1] ?? 11) + 8;
     return h_flex().id("titlebar").size_full().bg(t.chrome).border_b(1).border_color(t.border).text_color(t.muted).text_size(12).items_center()
       // Equal-width sides (flex_1 from zero) keep the search box exactly centered.
       .child(h_flex().flex_1().min_w(0).h_full().items_center().overflow_hidden()
         .child(div().w(inset).flex_none())
         .child(div().id("t-side").size(toggleSize).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
+          .when(trafficLights, el => el.self_start().mt(trafficLightCenter - toggleSize / 2))
           .role("button").accessibility_label("Toggle sidebar").tooltip("Toggle sidebar")
           .text_color(find(L, "side")?.hidden ? t.dim : t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_mouse_down("left", stop).on_click(() => run("layout.toggle", { id: "side" }))

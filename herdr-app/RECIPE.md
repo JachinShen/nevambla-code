@@ -8,7 +8,7 @@ An editor-style Herdr window in Dracula colors: a title bar, an activity rail, a
 
 The `dracula` theme, JetBrainsMono Nerd Font at 13 px and terminal padding 6 × 12 apply throughout.
 
-1. **Title bar** (`vsc-titlebar`, 45 px): a left sidebar toggle and a centered 380 px command center showing the active Space. It drags the window. The system title bar is hidden; traffic lights sit at 14, 11. Claude usage is optional and disabled by default.
+1. **Title bar** (`vsc-titlebar`, 45 px): a left sidebar toggle and a centered 380 px command center showing the active Space. It drags the window. The system title bar is hidden. The toggle aligns with the macOS traffic lights, inset at 14, 11. Claude usage is optional and disabled by default.
 2. **Activity rail** (`vsc-activity`, 48 px): Explorer, Source Control and Spaces at the top; compact agent icons near the bottom, an expansion arrow immediately below them, then Settings. Long agent lists scroll within the available height.
 3. **Sidebar** (378 px by default, resizable 170–520): one stack showing `vsc-explorer`, `vsc-changes` or `vsc-spaces`. An independently resizable Agents list occupies the lower sidebar when expanded.
 4. **Workspace**: fills the remaining width beside the sidebar. A 36 px `vsc-panelbar` sits over the active native tab. Tabs are 160 px, aligned left; + follows the last tab and spare space remains to the right. Pane frames have square corners, a 1 px border, zero gap and an always-visible 28 px `vsc-pane` header. Files and terminals use the same area.
