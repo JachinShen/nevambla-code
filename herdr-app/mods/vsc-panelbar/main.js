@@ -27,11 +27,44 @@ export default class VscPanelbar extends View {
       finally { this.migrations.delete(space); cx.notify(); }
     });
   }
-  icon(id, file, title, action) {
+  actionMenu(id, trigger, items, mouseButton = "left") {
     const t = theme();
-    return div().id(id).size(28).flex_none().flex().items_center().justify_center().rounded(4).cursor_pointer().tooltip(title)
-      .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground)).on_click(action)
-      .child(svg(`mods/vsc-panelbar/${file}.svg`).size(16));
+    const choose = (index, cx) => {
+      this.menu = null;
+      items[index]?.[1]();
+      cx.notify();
+    };
+    return Popover.new(id).mouse_button(mouseButton).anchor("bottom_left").track_focus(this.menuHandle)
+      .open(this.menu === id).on_open_change((open, cx) => {
+        if (open) {
+          this.menu = id;
+          this.menuAt = 0;
+        } else if (this.menu === id) this.menu = null;
+        cx.notify();
+      })
+      .trigger(trigger).content(v_flex().role("menu").w(190).p(5).bg(t.popover).text_size(12.8)
+        .on_key_down((e, cx) => {
+          if (e.key === "down") this.menuAt = ((this.menuAt ?? 0) + 1) % items.length;
+          else if (e.key === "up") this.menuAt = ((this.menuAt ?? 0) + items.length - 1) % items.length;
+          else if (e.key === "enter") choose(this.menuAt ?? 0, cx);
+          else return;
+          cx.stop_propagation(); cx.notify();
+        }).children(items.map(([label], i) => div().id(`${id}-action-${i}`).role("menu_item").h(31).px(8).flex().items_center().rounded(4)
+          .text_color(t.foreground).when(i === (this.menuAt ?? 0), el => el.bg(t.selected).aria_active_descendant()).hover(s => s.bg(t.hover))
+          .cursor_pointer().on_click((_e, cx) => choose(i, cx)).child(label))));
+  }
+  newTerminalControls(space, pane, t) {
+    const button = (id, width, icon, size, label) => div().id(id).w(width).h(28).flex_none().flex().items_center().justify_center()
+      .rounded(4).cursor_pointer().role("button").accessibility_label(label).tooltip(label)
+      .text_color(t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+      .child(svg(`mods/vsc-panelbar/${icon}.svg`).size(size));
+    return h_flex().id("new-terminal-controls").flex_none().items_center()
+      .child(button("p-new", 28, "plus", 16, "New terminal tab")
+        .on_click(() => run("tab.new", space ? { space: space.id } : {})))
+      .when(Boolean(pane), el => el.child(this.actionMenu(`split-terminal-${pane}`,
+        button("p-new-menu", 20, "chevron-down", 12, "New terminal beside this pane"),
+        [["New terminal to the right", () => run("pane.split", { pane, direction: "right" })],
+          ["New terminal below", () => run("pane.split", { pane, direction: "down" })]])));
   }
   tab(tab, space, files, t) {
     const parts = panes().filter(p => p.tab === tab.id), entries = files.filter(e => e.tab === tab.id);
@@ -59,19 +92,9 @@ export default class VscPanelbar extends View {
     if (!fileOnly) return button;
     const items = [["Rename", () => run("tab.rename", { id: tab.id })],
       ["Close", () => closeFileTab(tab.id)], ["Close Others", () => closeOtherFiles(tab.id, space.id)]];
-    const choose = (i, cx) => { this.menu = null; if (spaces().some(s => s.active && s.id === space.id && s.tabs.some(t => t.id === tab.id))) items[i]?.[1](); cx.notify(); };
-    return Popover.new(`tab-menu-${tab.id}`).mouse_button("right").anchor("bottom_left").track_focus(this.menuHandle)
-      .open(this.menu === tab.id).on_open_change((open, cx) => { this.menu = open ? tab.id : null; this.menuAt = 0; cx.notify(); })
-      .trigger(button).content(v_flex().w(190).p(5).bg(t.popover).text_size(12.8)
-        .on_key_down((e, cx) => {
-          if (e.key === "down") this.menuAt = ((this.menuAt ?? 0) + 1) % items.length;
-          else if (e.key === "up") this.menuAt = ((this.menuAt ?? 0) + items.length - 1) % items.length;
-          else if (e.key === "enter") choose(this.menuAt ?? 0, cx);
-          else return;
-          cx.stop_propagation(); cx.notify();
-        }).children(items.map(([label], i) => div().id(`tab-action-${i}`).h(31).px(8).flex().items_center().rounded(4)
-          .text_color(t.foreground).when(i === (this.menuAt ?? 0), el => el.bg(t.selected)).hover(s => s.bg(t.hover))
-          .cursor_pointer().on_click((_e, cx) => choose(i, cx)).child(label))));
+    return this.actionMenu(`tab-menu-${tab.id}`, button, items.map(([label, action]) => [label, () => {
+      if (spaces().some(s => s.active && s.id === space.id && s.tabs.some(t => t.id === tab.id))) action();
+    }]), "right");
   }
   render(cx) {
     const t = theme(), space = spaces().find(s => s.active);
@@ -89,14 +112,9 @@ export default class VscPanelbar extends View {
           .child(h_flex().id("ptabs").w_full().min_w(0).h_full().items_center().overflow_x_scroll().track_scroll(this.scroll)
             .on_size_change((_size, cx) => { if (active >= 0) { this.scroll.scroll_to_item(active); cx.notify(); } })
             .children(tabs.map(tab => this.tab(tab, space, files, t)))
-            .child(this.icon("p-new", "plus", "New terminal", () => run("tab.new", { space: space.id }))))
+            .child(this.newTerminalControls(space, pane, t)))
           .child(Scrollbar.horizontal("ptabs").absolute().inset_0().mode("always")))
         .when(Boolean(this.errors.get(space?.id)), el => el.child(div().id("restore-files").px(8).text_size(11).text_color(t.ansi1)
-          .tooltip(this.errors.get(space.id)).cursor_pointer().on_click((_e, cx) => { this.errors.delete(space.id); this.migrate(space.id, cx); }).child("Restore files · Retry")))
-        .child(h_flex().flex_none().px(8).gap(4).items_center()
-          .when(Boolean(pane), el => el
-            .child(this.icon("p-split-right", "split", "Split terminal right", () => run("pane.split", { pane, direction: "right" })))
-            .child(this.icon("p-split-down", "panel-bottom", "Split terminal down", () => run("pane.split", { pane, direction: "down" })))
-            .child(this.icon("p-zoom", "maximize", "Zoom pane ⌘J", () => run("pane.zoom", { pane }))))));
+          .tooltip(this.errors.get(space.id)).cursor_pointer().on_click((_e, cx) => { this.errors.delete(space.id); this.migrate(space.id, cx); }).child("Restore files · Retry"))));
   }
 }

@@ -1,5 +1,4 @@
-// VS Code-style title bar: room for the traffic lights, a centered command
-// center (opens the command palette) and layout toggles on the right.
+// Title bar with a sidebar toggle beside the traffic lights and a centered command palette.
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { theme, run, spaces, layout, window, exec, appHome, shared, setShared, props, openOverlay, closeOverlay, checking } from "herdr";
@@ -111,33 +110,31 @@ export default class VscTitlebar extends View {
       .when(!u?.five_hour, el => el.child(div().text_color(t.dim).child(u?.error ?? "Loading…")));
   }
 
-  icon(id, file, on, action) {
-    const t = theme();
-    return div().id(id).size(24).flex().items_center().justify_center().rounded(5).cursor_pointer()
-      .text_color(on ? t.foreground : t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
-      .on_mouse_down("left", stop).on_click(action)
-      .child(svg(`mods/vsc-titlebar/${file}.svg`).size(15));
-  }
-
   render() {
     const t = theme(), L = layout();
     const space = spaces().find(s => s.active);
     const title = `${space?.name ?? "Herdr"} — Herdr`;
-    const w = window(), mac = w?.platform === "macos";
-    // Leave room for the traffic lights only when macOS shows them (not in full screen).
-    const lights = mac && !w?.fullscreen;
+    const w = window(), trafficLights = w?.platform === "macos" && !w.fullscreen;
+    const inset = trafficLights ? 80 : 14;
+    const toggleSize = 24, usageGap = 8;
     return h_flex().id("titlebar").size_full().bg(t.chrome).border_b(1).border_color(t.border).text_color(t.muted).text_size(12).items_center()
       // Equal-width sides (flex_1 from zero) keep the search box exactly centered.
       .child(h_flex().flex_1().min_w(0).h_full().items_center().overflow_hidden()
-        .child(div().w(lights ? 80 : 14).flex_none())
-        .when(showUsage(), el => el.child(this.usageView(t, lights ? 80 : 14, find(L, "titlebar")?.size?.px ?? 35))))
+        .child(div().w(inset).flex_none())
+        .child(div().id("t-side").size(toggleSize).flex_none().flex().items_center().justify_center().rounded(5).cursor_pointer()
+          .role("button").accessibility_label("Toggle sidebar").tooltip("Toggle sidebar")
+          .text_color(find(L, "side")?.hidden ? t.dim : t.muted).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .on_mouse_down("left", stop).on_click(() => run("layout.toggle", { id: "side" }))
+          .child(svg("mods/vsc-titlebar/panel-left.svg").size(15)))
+        .when(showUsage(), el => el
+          .child(div().w(usageGap).flex_none())
+          .child(this.usageView(t, inset + toggleSize + usageGap, find(L, "titlebar")?.size?.px ?? 35))))
       .child(h_flex().id("command-center").w(380).flex_shrink_0().h(24).flex_none().px(10).gap(6).items_center().justify_center()
         .rounded(6).border_1().border_color(t.border).bg(t.input).cursor_pointer()
         .hover(s => s.border_color(t.dim).text_color(t.foreground))
         .on_mouse_down("left", stop).on_click(() => run("app.palette"))
         .child(svg("mods/vsc-titlebar/search.svg").size(12).text_color(t.dim))
         .child(div().truncate().child(title)))
-      .child(h_flex().flex_1().min_w(0).h_full().pr(10).items_center().justify_end()
-        .child(this.icon("t-side", "panel-left", !find(L, "side")?.hidden, () => run("layout.toggle", { id: "side" }))));
+      .child(div().flex_1().min_w(0));
   }
 }

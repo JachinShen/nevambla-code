@@ -28,7 +28,7 @@ async function harness(saved = {}) {
     panes: ["alpha", "beta"].map(id => ({pane:id+"-shell",tab:id+"-terminal",terminal:id+"/t1",cwd:"/repo"})),
     props: {}, text: "original\n" };
   const ui = { View: class {}, div: element, svg: element, image: element, h_flex: element, v_flex: element, v_virtual_list: element,
-    Popover: {new:()=>element("popover")}, TextView:{markdown:element}, Scrollbar:{vertical:element}, Editor:{new:element},
+    Popover: {new:id=>element("popover").id(id)}, TextView:{markdown:element}, Scrollbar:{vertical:element,horizontal:element}, Editor:{new:element},
     ScrollHandle:{new:()=>({scroll_to_item(){}})},
     EditorState:{new:options=>({options,text:options.value,value(){return this.text;},on(name,fn){this[name]=fn;},release(){this.released=true;}})} };
   const host = {
@@ -115,6 +115,34 @@ test("File splits pass captured props to Herdr's native split and do not create 
   const {state,files}=await harness();const opened=await files.openFile(file("/repo/a.v","chip"));
   files.splitFile(opened.pane,"down");
   assert.deepEqual(state.actions.at(-1),["pane.split",{pane:opened.pane,direction:"down",mod:"vsc-editor",props:{file:file("/repo/a.v","chip")}}]);
+});
+test("The tab strip creates a new terminal tab or splits a terminal beside a focused file", async () => {
+  const { state, files, bar, cx } = await harness({ "vsc.files.migrated:alpha": true });
+  const opened = await files.openFile(file("/repo/a.v", "chip"));
+  state.focus = opened.pane;
+  const view = bar();
+  const menuId = `split-terminal-${opened.pane}`;
+  const tabMenuId = `tab-menu-${opened.tab}`;
+  let tree = view.render(cx);
+
+  byId(tree, "p-new").handlers.on_click({}, cx);
+  assert.deepEqual(state.actions.at(-1), ["tab.new", { space: "alpha" }]);
+  assert.equal(byId(tree, tabMenuId).styles.mouse_button, "right");
+
+  byId(tree, menuId).handlers.on_open_change(true, cx);
+  tree = view.render(cx);
+  assert.equal(byId(tree, menuId).styles.open, true);
+  byId(tree, `${menuId}-action-0`).handlers.on_click({}, cx);
+  assert.deepEqual(state.actions.at(-1), ["pane.split", { pane: opened.pane, direction: "right" }]);
+
+  tree = view.render(cx);
+  assert.equal(byId(tree, menuId).styles.open, false);
+  byId(tree, menuId).handlers.on_open_change(true, cx);
+  tree = view.render(cx);
+  const menu = byId(tree, menuId).nodes.find(node => node.styles.role === "menu");
+  menu.handlers.on_key_down({ key: "down" }, cx);
+  menu.handlers.on_key_down({ key: "enter" }, cx);
+  assert.deepEqual(state.actions.at(-1), ["pane.split", { pane: opened.pane, direction: "down" }]);
 });
 test("Diff tabs retain a separate identity and refresh an existing pane instead of duplicating it",async()=>{
   const {state,files}=await harness();await files.openFile(file("/repo/a.txt"));
